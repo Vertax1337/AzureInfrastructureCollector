@@ -89,7 +89,7 @@ Local writes: approved local CurrentUser bootstrap/export operations only
 PRE-AZURE VALIDATION RESULT
 Status: READY FOR AZURE TEST
 Initial read-only gate: READ-ONLY VERIFIED
-Pester: <version>; Failed: 0
+Pester: 6.0.1; Failed: 0
 Final read-only gate: READ-ONLY VERIFIED
 Azure access performed: NO
 Administrator elevation: NOT USED
@@ -126,8 +126,10 @@ Tools/Invoke-PreAzureValidation.ps1
    |
    +--> PowerShell 7.6 LTS prüfen
    +--> Read-only Gate #1
-   +--> Pester 5.5.0+ prüfen
-   +--> falls nötig Pester nur CurrentUser installieren
+   +--> exakt Pester 6.0.1 prüfen
+   +--> falls nötig exakt Pester 6.0.1 nur CurrentUser installieren
+   +--> andere geladene Pester-Versionen aus der Session entfernen
+   +--> exakt den Pester-6.0.1-Modulpfad importieren
    +--> vollständige Pester-Suite
    +--> Read-only Gate #2
    |
@@ -207,9 +209,23 @@ Bootstrap-Verhalten:
 
 Pester ist keine Runtime-Abhängigkeit des normalen Collectors, sondern die verpflichtende Testabhängigkeit der Pre-Azure-Validierung.
 
-Aktuelle Mindestversion: **Pester 5.5.0**, zentral definiert als `validation.minimumPesterVersion` in `Config/collector.config.json`.
+Verbindliche Validierungsversion: **Pester 6.0.1**, zentral definiert als `validation.requiredPesterVersion` in `Config/collector.config.json`.
 
-`Tools/Invoke-PreAzureValidation.ps1` darf fehlendes Pester ausschließlich mit `Install-Module -Scope CurrentUser` aus der bereits registrierten `PSGallery` installieren.
+Die Version wird bewusst exakt gepinnt. Eine zukünftige Pester-Major- oder Minor-Version wird nicht automatisch als validiert betrachtet.
+
+`Tools/Invoke-PreAzureValidation.ps1`:
+
+1. prüft exakt auf Pester 6.0.1,
+2. installiert bei Bedarf exakt diese Version aus der bereits registrierten `PSGallery`,
+3. verwendet ausschließlich `Install-Module -RequiredVersion 6.0.1 -Scope CurrentUser`,
+4. entfernt bereits geladene Pester-Versionen aus der aktuellen Validierungssession,
+5. importiert exakt den gefundenen Pester-6.0.1-Modulpfad,
+6. verifiziert, dass die benötigten Testbefehle aus dem Modul `Pester` stammen,
+7. führt anschließend erst die Testsuite aus.
+
+Die Testsuite verwendet Pester-6-Syntax. Insbesondere wird das in Pester 6 entfernte `Assert-MockCalled` nicht verwendet; Mock-Aufrufe werden mit `Should -Invoke` geprüft.
+
+Ein altes systemweit vorhandenes Pester, z. B. 3.4.0, muss nicht deinstalliert werden und darf die aktuelle Validierung nicht beeinflussen.
 
 ## 3.5 Vom Gate erzwungene lokale Grenze
 
@@ -251,9 +267,12 @@ PowerShell 7.6 LTS
 Read-only Gate #1
       |
       v
-Pester vorhanden?
+Pester 6.0.1 vorhanden?
       |
-      +-- nein --> CurrentUser installieren
+      +-- nein --> exakt 6.0.1 CurrentUser installieren
+      |
+      v
+Pester-Session isolieren / exakten Modulpfad importieren
       |
       v
 Pester-Suite ./Tests
@@ -269,11 +288,12 @@ Read-only Gate #2
 Ein realer Azure-Test des aktuellen Standes ist nur zulässig, wenn:
 
 - initiales Gate `READ-ONLY VERIFIED`,
+- Pester-Version exakt `6.0.1`,
 - Pester-Fehleranzahl `0`,
 - finales Gate `READ-ONLY VERIFIED`,
 - Gesamtstatus `READY FOR AZURE TEST`.
 
-Ändert sich anschließend ausführbarer Code, ist die Freigabe erneut durchzuführen.
+Ändert sich anschließend ausführbarer Code oder die Validierungsversion, ist die Freigabe erneut durchzuführen.
 
 `.github/workflows/read-only-gate.yml` verwendet denselben kanonischen Validierungspfad und besitzt nur `contents: read` auf das Repository.
 
@@ -529,8 +549,10 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 
 ## P0c – Pre-Azure Validation
 - [x] `Tools/Invoke-PreAzureValidation.ps1`
-- [x] Pester-Mindestversion zentral konfigurieren
-- [x] fehlendes Pester automatisch nur `CurrentUser` installieren
+- [x] Pester-Version exakt auf 6.0.1 pinnen
+- [x] fehlendes Pester 6.0.1 automatisch nur `CurrentUser` installieren
+- [x] geladene Pester-Versionen vor Testlauf isolieren
+- [x] Pester-6-Testsyntax (`Should -Invoke`) verwenden
 - [x] initiales Read-only-Gate
 - [x] vollständige Pester-Suite
 - [x] finales Read-only-Gate
@@ -607,9 +629,10 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 8. Keine Self-Elevation.
 9. PowerShell wird nicht automatisch installiert oder aktualisiert.
 10. Unterstützte Runtime ist PowerShell 7.6 LTS oder neuer, solange eine spätere Version explizit verifiziert ist.
-11. Keine automatische PowerShell-Repository-Mutation.
-12. Vor realen Azure-Läufen muss der aktuelle Stand `READY FOR AZURE TEST` erreichen.
-13. Architektur-/Scope-Änderungen werden zuerst in diesem Dokument festgelegt.
+11. Pester ist für die Pre-Azure-Validierung exakt auf 6.0.1 gepinnt; Versionsänderungen benötigen erneute Verifikation.
+12. Keine automatische PowerShell-Repository-Mutation.
+13. Vor realen Azure-Läufen muss der aktuelle Stand `READY FOR AZURE TEST` erreichen.
+14. Architektur-/Scope-Änderungen werden zuerst in diesem Dokument festgelegt.
 
 ---
 
