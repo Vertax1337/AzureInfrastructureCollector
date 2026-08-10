@@ -58,11 +58,15 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - explicit Resource-ID-based P3 network relationships for subnet containment, peerings, NSG/route/NAT associations, NIC/VM/subnet/Public-IP associations and gateway connections
 - `Inventory/network.json` plus nested `summary.network` output
 - six P3 network Pester tests covering query safety, topology normalization, NSG rule minimization, VPN connection secret exclusion and empty-collection stability
+- three additional export-shape regression tests covering string-array preservation, nested enumerable flattening and hardened network address fields
 - `Docs/P3-Network.md` defining the P3a/P3b architecture and safety boundary
 
 ### Fixed
 
 - export hardening now preserves empty arrays as `[]` instead of collapsing them to `null`; this keeps fields such as `errors`, `violations` and `resourceGroupFilter` schema-stable
+- export hardening now handles strings/value types and enumerables before PSCustomObject/ETS property inspection so string arrays remain actual values instead of objects such as `{ "Length": 12 }`
+- accidental nested enumerable wrappers are flattened during final export hardening so collection fields remain stable one-dimensional arrays instead of leaking PowerShell array metadata such as `Count`, `Length`, `SyncRoot` or `Rank`
+- the scalar/array export-shape fix also restores readable command-name strings in `readOnlyVerification.json.approvedAzureCommandsFound`
 - `resources.json` now uses the canonical Resource Group spelling from `resourceGroups.json` for the same subscription instead of preserving inconsistent Resource Graph casing
 - `readOnlyVerification.json` no longer exposes the local collector repository path (`repositoryRoot`)
 - `manifest.json` no longer exports the executing Azure account/UPN
