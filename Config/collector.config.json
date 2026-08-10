@@ -21,6 +21,13 @@
     "jsonDepth": 20
   },
   "security": {
-    "sensitivePropertyPattern": "(?i)(secret|password|passwd|token|credential|connectionstring|connection_string|sastoken|accesskey|accountkey|privatekey|clientsecret|apikey)"
+    "sensitivePropertyPattern": "(?i)(secret|password|passwd|token|credential|connectionstring|connection_string|sastoken|accesskey|accountkey|privatekey|clientsecret|apikey)",
+    "sensitiveValuePatterns": [
+      "(?i)(?:^|[?&])sig=[^&\\s]+(?:&|$)",
+      "(?i)(?:AccountKey|SharedAccessSignature)\\s*=\\s*[^;\\s]+",
+      "(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+      "(?i)\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\b",
+      "(?i)\\b(?:password|passwd|clientsecret|api[_-]?key|access[_-]?key|sas[_-]?token)\\s*[:=]\\s*[^\\s;,]+"
+    ]
   }
 }
