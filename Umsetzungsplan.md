@@ -144,10 +144,15 @@ Collect-AzureDocumentation.ps1
    +--> Read-only Gate erneut
    +--> Tenant / Subscription Scope
    +--> Azure Resource Graph / geprüfte Read-only Cmdlets
-   +--> Normalisierung / Secret-Filtering
+   +--> Core-Normalisierung
+   +--> Collector.ExportSecurity
+   |      +--> sensitive Property-Namen redigieren
+   |      +--> sensitive Wertmuster redigieren
+   |      +--> Resource-Group-Referenzen kanonisieren
+   |      +--> lokale/operatorbezogene Exportmetadaten minimieren
    |
    v
-Normalisiertes JSON-Modell
+Normalisiertes und gehärtetes JSON-Modell
    |
    +--> readOnlyVerification.json
    +--> manifest.json
@@ -319,9 +324,11 @@ Lokale Administratorrechte sind nicht vorgesehen. Azure-seitig soll Reader-orien
 
 Keine Kennwörter, Client Secrets, Storage Keys, SAS Tokens, Private Keys, Access Tokens, API Keys oder sonstigen Credential-Werte werden bewusst exportiert.
 
+Neben sensitiven Feld-/Tag-Namen wird der finale Export zusätzlich anhand starker Wertmuster geprüft. Die zentrale Exporthärtung gilt auch für später hinzukommende Fachmodule.
+
 ## 5.6 Reproduzierbarkeit
 
-Stabile Felder, konsistente Dateinamen, definierte Sortierung, ISO-8601-Zeitstempel, Resource IDs und Schema-/Collector-Versionen.
+Stabile Felder, konsistente Dateinamen, definierte Sortierung, ISO-8601-Zeitstempel, Resource IDs und Schema-/Collector-Versionen. Resource-Group-Referenzen in Ressourcen werden subscriptionbezogen gegen `resourceGroups.json` kanonisiert.
 
 ## 5.7 Best Effort
 
@@ -344,6 +351,7 @@ AzureInfrastructureCollector/
 |   +-- Collector.Bootstrap.psm1
 |   +-- Collector.ReadOnlyGuard.psm1
 |   +-- Collector.Core.psm1
+|   +-- Collector.ExportSecurity.psm1
 |   +-- Collector.Network.psm1
 |   +-- Collector.Compute.psm1
 |   +-- Collector.AVD.psm1
@@ -448,6 +456,12 @@ Log Analytics, Diagnostic Settings, Action Groups, Alerts, Automation Accounts, 
 ```
 
 Resource ID ist der bevorzugte technische Primärschlüssel. Arrays werden stabil sortiert. Nicht verfügbare Werte werden nicht erfunden. `Output/` bleibt von Git ausgeschlossen.
+
+Export-Minimierung:
+
+- lokale Repository-/Arbeitsplatzpfade werden nicht in `readOnlyVerification.json` ausgegeben,
+- das ausführende Azure-Konto/UPN wird nicht in `manifest.json` ausgegeben,
+- Tenant-, Subscription- und Resource IDs bleiben als technische Korrelationsschlüssel erhalten.
 
 ---
 
@@ -562,7 +576,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [x] finales Read-only-Gate
 - [x] eindeutiger Status `READY FOR AZURE TEST`
 - [x] GitHub Actions auf denselben kanonischen Pfad umstellen
-- [x] automatische lokale Validierung unter PowerShell 7.6.4: Pester 6.0.1, 19/19 Tests, beide Gates `READ-ONLY VERIFIED`
+- [x] automatische lokale Validierung unter PowerShell 7.6.4: Pester 6.0.1, 19/19 Tests, beide Gates `READ-ONLY VERIFIED` auf dem ersten Real-Run-Stand
 
 ## P1 – Core
 - [x] Collector-Einstieg
@@ -583,7 +597,21 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [x] stabile Normalisierung/Sortierung
 - [x] Summary
 - [x] erster realer Integrationstest: 1 Subscription, 12 Resource Groups, 134 Ressourcen, 0 Fehler, `Success`, Laufzeit 00:03
-- [ ] Exportinhalt fachlich gegen Azure-Iststand stichprobenartig validieren
+- [x] erster Export strukturell geprüft: JSON/Counts/IDs/Summary/Manifest intern konsistent, keine offensichtlichen Secret-Leaks
+- [ ] fachliche Stichprobe der Ressourcenzahlen gegen Azure-Iststand
+
+## P2a – Export-Härtung vor P3
+- [x] Resource-Group-Namen subscriptionbezogen gegen `resourceGroups.json` kanonisieren
+- [x] lokalen `repositoryRoot` aus `readOnlyVerification.json` entfernen
+- [x] ausführendes Azure-Konto/UPN aus `manifest.json` entfernen
+- [x] zentrale wertbasierte Secret-Redaction ergänzen
+- [x] starke Muster für SAS/signierte URLs, Account Keys/Connection Strings, Private Keys, JWTs und eingebettete Credentials konfigurieren
+- [x] normale HTTPS-Werte explizit als Nicht-Secret testen
+- [x] dedizierte Unit-Tests für Export-Härtung ergänzen; erwarteter Gesamtumfang ab diesem Stand: 26 Tests
+- [ ] gehärteten Stand lokal durch automatische Pre-Azure-Validierung bestätigen (`READ-ONLY VERIFIED`, 26/26, `READY FOR AZURE TEST`)
+- [ ] zweiten Real-Run erzeugen und dessen Export erneut strukturell/auf Secret-Leakage prüfen
+
+> **P3 beginnt erst nach erfolgreichem Abschluss der beiden offenen P2a-Validierungspunkte.**
 
 ## P3 – Netzwerk
 - [ ] Netzwerkobjekte und Relationships
@@ -609,7 +637,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 ## P10 – Qualitätssicherung / Härtung
 - [ ] Integrationstests in heterogenen Testumgebungen
 - [ ] Reader-Rechte / fehlende Berechtigungen
-- [ ] Secret Leakage Tests
+- [ ] weitergehende Secret Leakage Tests mit späteren Detailmodulen
 - [ ] JSON Schema Validation
 - [ ] ScriptAnalyzer
 - [ ] Read-only-Test für jeden neuen Azure-Aufruf
@@ -639,12 +667,14 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 12. Keine automatische PowerShell-Repository-Mutation.
 13. Vor realen Azure-Läufen muss der aktuelle Stand `READY FOR AZURE TEST` erreichen; im normalen Startpfad wird dies automatisch erzwungen.
 14. Architektur-/Scope-Änderungen werden zuerst in diesem Dokument festgelegt.
+15. Jeder Fachmodul-Export muss vor dem Schreiben durch die zentrale Export-Härtung laufen.
+16. P3/P4 dürfen keine parallelen Sonderwege für Secret-Filtering oder RG-Normalisierung einführen.
 
 ---
 
 # 17. Definition of Done Collector-Modul
 
-Ein Modul gilt erst als fertig, wenn es kundengenerisch ist, Scope-Filter respektiert, Azure-Aufrufe read-only verifiziert sind, Fehler/Berechtigungen transparent behandelt werden, keine Secrets exportiert werden, Daten stabil sind, Tests vorhanden sind und die abschließende Pre-Azure-Validierung erfolgreich ist.
+Ein Modul gilt erst als fertig, wenn es kundengenerisch ist, Scope-Filter respektiert, Azure-Aufrufe read-only verifiziert sind, Fehler/Berechtigungen transparent behandelt werden, keine Secrets exportiert werden, Daten stabil sind, die zentrale Export-Härtung verwendet wird, Tests vorhanden sind und die abschließende Pre-Azure-Validierung erfolgreich ist.
 
 ---
 
@@ -678,6 +708,7 @@ P0b  Bootstrap / Dependency Handling
 P0c  Pre-Azure Validation
 P1   Core / Auth / Tenant / Subscription / Scope
 P2   Basisinventar
+P2a  Export-Härtung vor P3
 P3   Netzwerk
 P4   Compute
 P5   AVD
@@ -689,7 +720,7 @@ P10  Tests / Härtung
 P11  Release 1.0
 ```
 
-**Aktueller nächster Schritt:** Den erfolgreichen Real-Export fachlich und strukturell prüfen (`manifest.json`, `summary.json`, `Inventory/resourceGroups.json`, `Inventory/resources.json`, `readOnlyVerification.json`, Logs), insbesondere gegen den Azure-Iststand und auf unerwünschte sensitive Inhalte. Erst danach wird P2 als fachlich validiert betrachtet und die Detailmodule P3/P4 werden ausgebaut.
+**Aktueller nächster Schritt:** Den gehärteten Stand über den normalen Ein-Befehl-Start lokal ausführen. Die automatisch eingebettete Pre-Azure-Validierung muss erneut `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` liefern; mit den sieben neuen Export-Härtungstests werden 26 erfolgreiche Tests erwartet. Anschließend wird der zweite Real-Export auf kanonische RG-Namen, entfernte lokale/operatorbezogene Metadaten, interne Konsistenz und Secret-Leakage geprüft. Erst danach beginnt P3.
 
 ---
 
@@ -715,7 +746,7 @@ Azure ist die Quelle der Wahrheit
         ->
 Collector erfasst ausschließlich lesend den Ist-Zustand
         ->
-JSON normalisiert die Fakten
+JSON normalisiert und härtet die Fakten
         ->
 KI interpretiert und formuliert
         ->
