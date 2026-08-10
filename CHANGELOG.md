@@ -6,13 +6,21 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 
 ### Added
 
+- preferred bootstrap entry point `Start-AzureInfrastructureCollector.ps1`
+- reusable `Collector.Bootstrap.psm1`
+- automatic detection of required Az modules before collector execution
+- automatic installation of missing `Az.Accounts` and `Az.ResourceGraph` with `Install-Module -Scope CurrentUser`
+- explicit prohibition of self-elevation and `AllUsers` dependency installation
+- controlled abort when PowerShell 7.2+ is unavailable instead of automatic PowerShell installation
+- controlled abort when `PSGallery` is unavailable instead of modifying repository configuration
+- bootstrap Pester tests for runtime and dependency behavior
+- read-only tests that explicitly allow `CurrentUser` module installation and block `Start-Process -Verb RunAs`
 - mandatory fail-closed read-only verification gate
 - standalone `Tools/Test-ReadOnlyCompliance.ps1` verification command
 - automatic verification before any collector Azure authentication or Resource Graph collection
 - explicit allowlist for verified Azure PowerShell commands
 - blocking of unknown Azure cmdlets, dynamic command execution, Azure CLI and direct REST/web execution in the MVP
 - process-scope enforcement for `Set-AzContext`
-- Pester tests for positive and negative read-only-gate scenarios
 - `readOnlyVerification.json` in successful collector exports
 - initial Core MVP entry point `Collect-AzureDocumentation.ps1`
 - reusable `Collector.Core.psm1`
