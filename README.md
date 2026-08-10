@@ -10,10 +10,16 @@ The authoritative project scope, architecture and safety rules are defined in [`
 
 ## Recommended entry point
 
-Use the bootstrap script:
+Use the bootstrap script from **PowerShell 7 (`pwsh.exe`)**, not Windows PowerShell 5.1 (`powershell.exe`):
 
 ```powershell
 ./Start-AzureInfrastructureCollector.ps1
+```
+
+If you are starting from Command Prompt or Windows PowerShell, invoke PowerShell 7 explicitly:
+
+```powershell
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-AzureInfrastructureCollector.ps1
 ```
 
 The bootstrap performs only local prerequisite handling before starting the collector:
@@ -52,11 +58,27 @@ Azure RBAC permissions are separate from local Windows administrator rights. The
 
 ## Mandatory read-only verification
 
-A standalone local verification is available:
+The standalone verification must also run under **PowerShell 7**.
+
+From an existing PowerShell 7 session:
 
 ```powershell
 ./Tools/Test-ReadOnlyCompliance.ps1
 ```
+
+Or explicitly from Command Prompt / Windows PowerShell:
+
+```powershell
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Test-ReadOnlyCompliance.ps1
+```
+
+Do **not** use:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\Tools\Test-ReadOnlyCompliance.ps1
+```
+
+`powershell.exe` is Windows PowerShell 5.1 and is outside the supported runtime. The checker now detects this before loading the PowerShell-7-only guard and exits without making any Azure request.
 
 The only successful approval state is:
 
@@ -191,10 +213,16 @@ The Core MVP exports only explicitly selected inventory fields. Full resource `p
 
 ## Tests
 
-Run all Pester tests:
+Run all Pester tests **from PowerShell 7**:
 
 ```powershell
 Invoke-Pester ./Tests
+```
+
+Or explicitly:
+
+```powershell
+pwsh.exe -NoProfile -Command "Invoke-Pester ./Tests"
 ```
 
 The suite covers:
