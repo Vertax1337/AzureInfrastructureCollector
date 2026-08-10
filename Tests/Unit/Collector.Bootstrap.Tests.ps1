@@ -5,8 +5,8 @@ BeforeAll {
 Describe 'Test-CollectorPowerShellRuntime' {
     It 'accepts PowerShell Core at or above the minimum version' {
         $result = Test-CollectorPowerShellRuntime `
-            -MinimumVersion ([version]'7.2.0') `
-            -CurrentVersion ([version]'7.4.0') `
+            -MinimumVersion ([version]'7.6.0') `
+            -CurrentVersion ([version]'7.6.1') `
             -CurrentEdition 'Core'
 
         $result.status | Should -Be 'OK'
@@ -16,8 +16,8 @@ Describe 'Test-CollectorPowerShellRuntime' {
     It 'rejects Windows PowerShell even when the numeric version would be high enough' {
         {
             Test-CollectorPowerShellRuntime `
-                -MinimumVersion ([version]'7.2.0') `
-                -CurrentVersion ([version]'7.4.0') `
+                -MinimumVersion ([version]'7.6.0') `
+                -CurrentVersion ([version]'7.6.1') `
                 -CurrentEdition 'Desktop'
         } | Should -Throw '*no self-elevation*'
     }
@@ -25,10 +25,10 @@ Describe 'Test-CollectorPowerShellRuntime' {
     It 'rejects a PowerShell Core version below the minimum' {
         {
             Test-CollectorPowerShellRuntime `
-                -MinimumVersion ([version]'7.2.0') `
-                -CurrentVersion ([version]'7.1.0') `
+                -MinimumVersion ([version]'7.6.0') `
+                -CurrentVersion ([version]'7.5.0') `
                 -CurrentEdition 'Core'
-        } | Should -Throw '*PowerShell 7.2.0 or newer*'
+        } | Should -Throw '*PowerShell 7.6.0 or newer*'
     }
 }
 
