@@ -24,6 +24,26 @@ $script:BlockedExecutionCommands = [System.Collections.Generic.HashSet[string]]:
     'az', 'az.cmd', 'az.exe'
 ) | ForEach-Object { [void]$script:BlockedExecutionCommands.Add($_) }
 
+$script:BlockedLocalMutationCommands = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+@(
+    'Update-Module',
+    'Uninstall-Module',
+    'Save-Module',
+    'Register-PSRepository',
+    'Set-PSRepository',
+    'Unregister-PSRepository',
+    'Install-Package',
+    'Uninstall-Package',
+    'Save-Package',
+    'Install-PSResource',
+    'Update-PSResource',
+    'Uninstall-PSResource',
+    'Save-PSResource',
+    'Register-PSResourceRepository',
+    'Set-PSResourceRepository',
+    'Unregister-PSResourceRepository'
+) | ForEach-Object { [void]$script:BlockedLocalMutationCommands.Add($_) }
+
 # Patterns are deliberately assembled from fragments so the guard can scan its own source
 # without matching the policy definitions themselves.
 $script:BlockedSourcePatterns = @(
@@ -74,22 +94,28 @@ function Get-CollectorReadOnlyScopeFiles {
     )
 }
 
-function Test-SetAzContextScope {
+function Test-CommandParameterLiteralValue {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [System.Management.Automation.Language.CommandAst]$CommandAst
+        [System.Management.Automation.Language.CommandAst]$CommandAst,
+
+        [Parameter(Mandatory)]
+        [string]$ParameterName,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedValue
     )
 
     $elements = @($CommandAst.CommandElements)
     for ($index = 0; $index -lt $elements.Count; $index++) {
-        if ($elements[$index].Extent.Text -ieq '-Scope') {
+        if ($elements[$index].Extent.Text -ieq $ParameterName) {
             if (($index + 1) -ge $elements.Count) {
                 return $false
             }
 
-            $scopeText = $elements[$index + 1].Extent.Text.Trim([char[]]@(39, 34))
-            return $scopeText -ieq 'Process'
+            $valueText = $elements[$index + 1].Extent.Text.Trim([char[]]@(39, 34))
+            return $valueText -ieq $ExpectedValue
         }
     }
 
@@ -156,6 +182,16 @@ function Test-CollectorReadOnlyCompliance {
                 continue
             }
 
+            if ($script:BlockedLocalMutationCommands.Contains($commandName)) {
+                $violations.Add((New-ReadOnlyViolation -File $relativePath -Code 'BLOCKED_LOCAL_MUTATION' -Message "Local mutation command '$commandName' is outside the approved bootstrap boundary." -Line $commandAst.Extent.StartLineNumber -Column $commandAst.Extent.StartColumnNumber))
+                continue
+            }
+
+            if ($commandName -ieq 'Install-Module' -and -not (Test-CommandParameterLiteralValue -CommandAst $commandAst -ParameterName '-Scope' -ExpectedValue 'CurrentUser')) {
+                $violations.Add((New-ReadOnlyViolation -File $relativePath -Code 'DEPENDENCY_SCOPE' -Message "Install-Module is allowed only with an explicit literal '-Scope CurrentUser'." -Line $commandAst.Extent.StartLineNumber -Column $commandAst.Extent.StartColumnNumber))
+                continue
+            }
+
             if ($commandName -match '(?i)^[A-Za-z]+-Az') {
                 [void]$observedAzureCommands.Add($commandName)
 
@@ -164,8 +200,8 @@ function Test-CollectorReadOnlyCompliance {
                     continue
                 }
 
-                if ($commandName -ieq 'Set-AzContext' -and -not (Test-SetAzContextScope -CommandAst $commandAst)) {
-                    $violations.Add((New-ReadOnlyViolation -File $relativePath -Code 'AZ_CONTEXT_SCOPE' -Message "Set-AzContext is allowed only with an explicit '-Scope Process' in this project." -Line $commandAst.Extent.StartLineNumber -Column $commandAst.Extent.StartColumnNumber))
+                if ($commandName -ieq 'Set-AzContext' -and -not (Test-CommandParameterLiteralValue -CommandAst $commandAst -ParameterName '-Scope' -ExpectedValue 'Process')) {
+                    $violations.Add((New-ReadOnlyViolation -File $relativePath -Code 'AZ_CONTEXT_SCOPE' -Message "Set-AzContext is allowed only with an explicit literal '-Scope Process' in this project." -Line $commandAst.Extent.StartLineNumber -Column $commandAst.Extent.StartColumnNumber))
                 }
             }
         }
@@ -183,7 +219,7 @@ function Test-CollectorReadOnlyCompliance {
         azureDataMutations         = if ($verified) { 'NONE DETECTED' } else { 'NOT VERIFIED' }
         controlPlaneWrites         = if ($verified) { 'NONE DETECTED' } else { 'NOT VERIFIED' }
         dataPlaneWrites            = if ($verified) { 'NONE DETECTED' } else { 'NOT VERIFIED' }
-        localWrites                = 'Allowed for collector output, logs and local processing only'
+        localWrites                = 'Allowed: CurrentUser dependency installation plus collector output/logs/local processing only'
         violations                 = @($violations)
     }
 
