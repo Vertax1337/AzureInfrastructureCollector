@@ -16,10 +16,25 @@ $ErrorActionPreference = 'Stop'
 
 $startedAt = Get-Date
 $scriptRoot = $PSScriptRoot
+$readOnlyGuardModulePath = Join-Path $scriptRoot 'Modules/Collector.ReadOnlyGuard.psm1'
 $coreModulePath = Join-Path $scriptRoot 'Modules/Collector.Core.psm1'
 $configPath = Join-Path $scriptRoot 'Config/collector.config.json'
 $resourcesQueryPath = Join-Path $scriptRoot 'Queries/Resources.kql'
 $resourceGroupsQueryPath = Join-Path $scriptRoot 'Queries/ResourceGroups.kql'
+
+# Supreme safety rule: no Azure collection starts unless the current executable
+# repository scope has passed the fail-closed read-only verification.
+Import-Module $readOnlyGuardModulePath -Force -ErrorAction Stop
+$readOnlyVerification = Test-CollectorReadOnlyCompliance -RepositoryRoot $scriptRoot -ThrowOnFailure
+
+Write-Host ''
+Write-Host 'READ-ONLY VERIFICATION'
+Write-Host ("Status: {0}" -f $readOnlyVerification.status)
+Write-Host ("Azure resource mutations: {0}" -f $readOnlyVerification.azureResourceMutations)
+Write-Host ("Azure data mutations: {0}" -f $readOnlyVerification.azureDataMutations)
+Write-Host ("Control-plane write operations: {0}" -f $readOnlyVerification.controlPlaneWrites)
+Write-Host ("Data-plane write operations: {0}" -f $readOnlyVerification.dataPlaneWrites)
+Write-Host ''
 
 Import-Module $coreModulePath -Force -ErrorAction Stop
 
@@ -40,13 +55,13 @@ $tenantDisplayName = Get-CollectorTenantDisplayName -Tenant $tenant
 $run = Initialize-CollectorExport -OutputPath $OutputPath -TenantDisplayName $tenantDisplayName -StartedAt $startedAt
 $errors = [System.Collections.Generic.List[object]]::new()
 
-Write-Host ''
 Write-Host ("AzureInfrastructureCollector {0}" -f $config.collector.version)
 Write-Host ("Tenant: {0}" -f $tenantDisplayName)
 Write-Host ("Subscriptions: {0}" -f $selectedSubscriptions.Count)
 Write-Host ("Export: {0}" -f $run.rootPath)
 Write-Host ''
 
+Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Read-only gate: {0}; Azure resource/data/control-plane/data-plane writes: none detected." -f $readOnlyVerification.status)
 Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Collector {0} started." -f $config.collector.version)
 Write-CollectorLog -Path $run.logPath -Level INFO -Message ("PowerShell {0}; modules: {1}" -f $prerequisites.powerShellVersion, (($prerequisites.modules | ForEach-Object { '{0} {1}' -f $_.name, $_.version }) -join ', '))
 Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Tenant '{0}' ({1}); subscriptions: {2}" -f $tenantDisplayName, $tenant.Id, (($selectedSubscriptions.Id) -join ', '))
@@ -55,6 +70,8 @@ $subscriptionIds = @($selectedSubscriptions | ForEach-Object { [string]$_.Id })
 $pageSize = [int]$config.resourceGraph.pageSize
 $sensitivePattern = [string]$config.security.sensitivePropertyPattern
 $jsonDepth = [int]$config.export.jsonDepth
+
+Export-CollectorJson -InputObject $readOnlyVerification -Path (Join-Path $run.rootPath 'readOnlyVerification.json') -Depth $jsonDepth
 
 $resourceGroups = @()
 try {
