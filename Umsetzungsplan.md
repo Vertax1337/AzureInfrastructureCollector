@@ -145,7 +145,7 @@ Collect-AzureDocumentation.ps1
    +--> Tenant / Subscription Scope
    +--> Azure Resource Graph / geprüfte Read-only Cmdlets
    +--> Core-Normalisierung
-   +--> P3a Network-Normalisierung / Relationships
+   +--> P3 Network-Normalisierung / Relationships (P3a + P3b)
    +--> Collector.ExportSecurity
    |      +--> sensitive Property-Namen redigieren
    |      +--> sensitive Wertmuster redigieren
@@ -329,7 +329,13 @@ Keine Kennwörter, Client Secrets, Storage Keys, SAS Tokens, Private Keys, Acces
 
 Neben sensitiven Feld-/Tag-Namen wird der finale Export zusätzlich anhand starker Wertmuster geprüft. Die zentrale Exporthärtung gilt auch für später hinzukommende Fachmodule.
 
-Für P3 gilt zusätzlich: `Microsoft.Network/connections.properties.sharedKey` darf weder abgefragt noch normalisiert oder exportiert werden.
+Für P3 gilt zusätzlich:
+
+- `Microsoft.Network/connections.properties.sharedKey` darf weder abgefragt noch normalisiert oder exportiert werden,
+- Private-Link-`requestMessage` und Connection-State-Beschreibungen werden nicht normalisiert/exportiert,
+- Application-Gateway-Zertifikatsmaterial wird nicht normalisiert/exportiert,
+- Azure-Firewall-Regelkollektionen werden in P3b nicht normalisiert/exportiert,
+- Firewall-Policy-Transport-Security-/Zertifikatsdaten werden in P3b nicht normalisiert/exportiert.
 
 ## 5.6 Reproduzierbarkeit
 
@@ -445,16 +451,25 @@ Tenant, Subscriptions, Resource Groups, Regionen, Ressourcentypen, Tags, Resourc
 - NSGs und benutzerdefinierte Security Rules,
 - Route Tables und Routes,
 - Virtual Network Gateways,
-- Local Network Gateways,
+- Local Network Gateways einschließlich IP-/FQDN-Endpunkt,
 - Connections ohne `sharedKey`,
 - Network Watcher,
 - explizite Resource-ID-basierte Relationships.
 
 ### P3b – Erweiterte Netzwerkdienste
 
-Nach erfolgreicher P3a-Validierung: Private Endpoints, Private DNS/VNet Links, NAT Gateways als eigene Ressourcen, Load Balancer, Application Gateway, Azure Firewall/Firewall-Policy-Referenzen und weitere sicher explizit projizierbare Netzwerkbeziehungen.
+P3b erweitert dasselbe Network-Modell um:
 
-Vollständige rohe `properties`-Blöcke werden auch in P3 nicht als Abkürzung exportiert.
+- Private Endpoints und normalisierte Private-Link-Verbindungen,
+- Private DNS Zones und VNet Links,
+- NAT Gateways als eigene Ressourcen inklusive Public-IP-/Public-IP-Prefix-Referenzen,
+- Load Balancer mit Frontends, Backend Pools/Adressen, Rules, Probes und Outbound Rules,
+- Application Gateways mit IP-/Frontend-/Port-/Backend-/Listener-/Routing-/Probe-/Path-Map-Struktur,
+- Azure Firewalls mit SKU, Threat-Intel-Modus, Policy-/Virtual-Hub-/Subnet-/Public-IP-Referenzen,
+- Firewall Policies mit SKU-/Threat-Intel-/Base-Policy-Metadaten,
+- zusätzliche deterministische Resource-ID-basierte Relationships.
+
+P3b erfasst bewusst keine Application-Gateway-Zertifikatsinhalte, keine Azure-Firewall-Regelkollektionen und keine Firewall-Policy-Transport-Security-/Zertifikatsdaten. Vollständige rohe `properties`-Blöcke werden auch in P3 nicht als Abkürzung exportiert.
 
 ## Compute
 VMs, Size/SKU, OS/Image, Availability, NIC-Zuordnung, OS-/Data-Disks, Disk SKU/Size, optional Power State als Momentaufnahme.
@@ -489,7 +504,21 @@ Log Analytics, Diagnostic Settings, Action Groups, Alerts, Automation Accounts, 
 
 Resource ID ist der bevorzugte technische Primärschlüssel. Arrays werden stabil sortiert. Nicht verfügbare Werte werden nicht erfunden. `Output/` bleibt von Git ausgeschlossen.
 
-`Inventory/network.json` enthält in P3a die Sammlungen `virtualNetworks`, `subnets`, `peerings`, `networkInterfaces`, `ipConfigurations`, `networkSecurityGroups`, `securityRules`, `publicIpAddresses`, `routeTables`, `routes`, `virtualNetworkGateways`, `localNetworkGateways`, `connections`, `networkWatchers` und `relationships` sowie eine eigene Summary.
+`Inventory/network.json` enthält nach P3a/P3b insbesondere:
+
+- `virtualNetworks`, `subnets`, `peerings`,
+- `networkInterfaces`, `ipConfigurations`,
+- `networkSecurityGroups`, `securityRules`,
+- `publicIpAddresses`, `routeTables`, `routes`,
+- `virtualNetworkGateways`, `localNetworkGateways`, `connections`, `networkWatchers`,
+- `privateEndpoints`, `privateLinkConnections`,
+- `privateDnsZones`, `privateDnsVirtualNetworkLinks`,
+- `natGateways`,
+- `loadBalancers`, `loadBalancerFrontendIpConfigurations`, `loadBalancerBackendPools`, `loadBalancerBackendAddresses`, `loadBalancerRules`, `loadBalancerProbes`, `loadBalancerOutboundRules`,
+- `applicationGateways`, `applicationGatewayIpConfigurations`, `applicationGatewayFrontendIpConfigurations`, `applicationGatewayFrontendPorts`, `applicationGatewayBackendPools`, `applicationGatewayBackendAddresses`, `applicationGatewayBackendHttpSettings`, `applicationGatewayHttpListeners`, `applicationGatewayRequestRoutingRules`, `applicationGatewayProbes`, `applicationGatewayUrlPathMaps`, `applicationGatewayPathRules`,
+- `azureFirewalls`, `azureFirewallIpConfigurations`, `firewallPolicies`,
+- `relationships`,
+- eine Network-Summary mit den jeweiligen Counts.
 
 Export-Minimierung:
 
@@ -497,7 +526,10 @@ Export-Minimierung:
 - das ausführende Azure-Konto/UPN wird nicht in `manifest.json` ausgegeben,
 - Tenant-, Subscription- und Resource IDs bleiben als technische Korrelationsschlüssel erhalten,
 - Network-Abfragen projizieren nur explizit freigegebene Felder,
-- Connection Shared Keys werden nicht abgefragt.
+- Connection Shared Keys werden nicht abgefragt,
+- Private-Link-Freitext wird nicht normalisiert/exportiert,
+- Application-Gateway-Zertifikatsmaterial wird nicht normalisiert/exportiert,
+- Azure-Firewall-Regelkollektionen werden in P3b nicht normalisiert/exportiert.
 
 ---
 
@@ -522,14 +554,50 @@ Virtual Network Gateway -> AttachedToSubnet -> Subnet
 Virtual Network Gateway -> UsesPublicIp -> Public IP
 Connection -> UsesVirtualNetworkGateway -> Virtual Network Gateway
 Connection -> UsesLocalNetworkGateway -> Local Network Gateway
+
+Private Endpoint -> AttachedToSubnet -> Subnet
+Private Endpoint -> ContainsPrivateLinkConnection -> Private Link Connection
+Private Link Connection -> ConnectsToResource -> Target Resource
+Private Endpoint -> ConnectsToResource -> Target Resource
+Private DNS Zone -> ContainsVirtualNetworkLink -> VNet Link
+Private DNS VNet Link -> LinkedToVNet -> VNet
+Private DNS Zone -> LinkedToVNet -> VNet
+NAT Gateway -> UsesPublicIp -> Public IP
+NAT Gateway -> UsesPublicIpPrefix -> Public IP Prefix
+
+Load Balancer -> ContainsLoadBalancerFrontend -> Frontend
+Load Balancer -> ContainsLoadBalancerBackendPool -> Backend Pool
+Load Balancer -> ContainsLoadBalancerRule -> Rule
+Load Balancer -> ContainsLoadBalancerProbe -> Probe
+Load Balancer -> ContainsLoadBalancerOutboundRule -> Outbound Rule
+Load Balancer Frontend -> AttachedToSubnet / UsesPublicIp / UsesPublicIpPrefix
+Load Balancer Rule -> UsesLoadBalancerFrontend / UsesLoadBalancerBackendPool / UsesLoadBalancerProbe
+
+Application Gateway -> ContainsApplicationGatewayIpConfiguration -> IP Configuration
+Application Gateway IP Configuration -> AttachedToSubnet -> Subnet
+Application Gateway -> ContainsApplicationGatewayFrontend -> Frontend
+Application Gateway Frontend -> AttachedToSubnet / UsesPublicIp
+Application Gateway -> ContainsApplicationGatewayBackendPool -> Backend Pool
+Application Gateway -> ContainsApplicationGatewayHttpListener -> Listener
+Application Gateway -> ContainsApplicationGatewayRoutingRule -> Routing Rule
+Routing Rule -> UsesApplicationGatewayHttpListener / BackendPool / BackendHttpSettings / UrlPathMap
+Application Gateway -> UsesFirewallPolicy -> Firewall Policy
+
+Azure Firewall -> UsesFirewallPolicy -> Firewall Policy
+Azure Firewall -> AttachedToVirtualHub -> Virtual Hub
+Azure Firewall -> ContainsAzureFirewallIpConfiguration -> IP Configuration
+Azure Firewall IP Configuration -> AttachedToSubnet / UsesPublicIp
+Firewall Policy -> InheritsFromFirewallPolicy -> Base Policy
+
 VM -> Managed Disk
-Private Endpoint -> Target Resource
 AVD Session Host -> VM
 Diagnostic Setting -> Destination
 Backup -> Protected Resource
 ```
 
-P3a verwendet bereits ein Network-spezifisches Relationship-Array. P9 vereinheitlicht später die Relationship-Schemata aller Fachmodule.
+P3 verwendet ein Network-spezifisches Relationship-Array. P9 vereinheitlicht später die Relationship-Schemata aller Fachmodule.
+
+Azure Resource IDs bleiben der bevorzugte technische Schlüssel. Für ausgewählte untergeordnete Azure-Objekte ohne eigene Resource ID dürfen ausschließlich deterministische Child-IDs unterhalb der Azure-Parent-ID erzeugt werden; keine Namensheuristik darf eine Beziehung zu einer externen Ressource erfinden.
 
 ---
 
@@ -537,7 +605,7 @@ P3a verwendet bereits ein Network-spezifisches Relationship-Array. P9 vereinheit
 
 Logs enthalten Zeitstempel, Level, Modul/Aktion und Ergebnis; niemals Secrets oder Access Tokens.
 
-Der normale Collector zeigt zusätzlich sichtbare Phasenmeldungen und Objektzähler, damit längere ARG-/Exportvorgänge nicht wie ein stiller Hänger wirken. Mit P3a umfasst der normale Collector fünf sichtbare Phasen.
+Der normale Collector zeigt zusätzlich sichtbare Phasenmeldungen und Objektzähler, damit längere ARG-/Exportvorgänge nicht wie ein stiller Hänger wirken. Der Network-Bereich wird innerhalb der dritten von fünf sichtbaren Collector-Phasen erfasst.
 
 Kritische Fehler:
 
@@ -549,7 +617,7 @@ Kritische Fehler:
 - Tenant/Subscription nicht erreichbar,
 - Core-Export nicht möglich.
 
-Ein isolierter P3a-Netzwerkfehler darf bei erfolgreichem Core-Inventar zu `PartialSuccess` führen, nicht zu einem stillen Verlust des Core-Exports.
+Ein isolierter P3-Netzwerkfehler darf bei erfolgreichem Core-Inventar zu `PartialSuccess` führen, nicht zu einem stillen Verlust des Core-Exports.
 
 Exit-Code-Kategorien:
 
@@ -673,20 +741,25 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 - [x] `Inventory/network.json` in normalen Collector integriert
 - [x] Network-Summary in `summary.json` integriert
 - [x] `sharedKey` aus Query und Schema explizit ausgeschlossen
-- [x] sechs dedizierte P3a-Unit-Tests ergänzt
+- [x] P3a-Unit-/Regressionstests einschließlich Export-Shape und Local-Gateway-FQDN ergänzt
 - [x] statische Read-only-Gegenprüfung: keine neuen Azure-/REST-/CLI-/SDK-Schreibpfade
-- [ ] aktuelle automatische Pre-Azure-Validierung erfolgreich (`READ-ONLY VERIFIED`, 0 Testfehler, `READY FOR AZURE TEST`)
-- [ ] erster P3a-Real-Export erzeugt und `network.json` fachlich/strukturell geprüft
+- [x] P3a-Real-Export nach Export-Shape-/FQDN-Fix erfolgreich: 12 RG, 134 Core-Ressourcen, 22 Network-Ressourcen, 44 eindeutige Relationships, 0 Orphans, 0 Collector-Fehler, `READ-ONLY VERIFIED`
+- [x] `network.json` fachlich/strukturell geprüft: stabile Arrays, FQDN-Endpunkt korrekt, keine Secret-Leakage; exakter Pester-Zähler wird derzeit nicht im ZIP persistiert
 
 ### P3b – Erweiterte Netzwerkdienste
-- [ ] Private Endpoints / Private DNS / VNet Links
-- [ ] NAT Gateways als eigene Ressourcen
-- [ ] Load Balancer
-- [ ] Application Gateway
-- [ ] Azure Firewall / Firewall Policy Referenzen
-- [ ] zusätzliche Relationships und Real-Export-Validierung
+- [x] Private Endpoints / Private-Link-Verbindungen
+- [x] Private DNS Zones / VNet Links
+- [x] NAT Gateways als eigene Ressourcen
+- [x] Load Balancer einschließlich Frontends, Backend Pools/Adressen, Rules, Probes und Outbound Rules
+- [x] Application Gateway einschließlich Topologie-/Routing-Komponenten ohne Zertifikatsmaterial
+- [x] Azure Firewall / Firewall Policy Referenzen ohne Firewall-Regelkollektionen
+- [x] zusätzliche Resource-ID-basierte Relationships
+- [x] acht dedizierte P3b-Unit-Tests ergänzt
+- [x] statische Read-only-Gegenprüfung: kein neues Azure-Cmdlet, kein REST-/CLI-/SDK-Pfad; bestehender `Search-AzGraph`-Wrapper unverändert
+- [ ] aktuelle automatische Pre-Azure-Validierung des P3b-Stands erfolgreich (`READ-ONLY VERIFIED`, 0 Testfehler, `READY FOR AZURE TEST`)
+- [ ] erster P3b-Real-Export erzeugt und `network.json` auf Counts, Relationships, Orphans, Schema-Stabilität und Secret-Leakage geprüft
 
-> **P3b beginnt erst nach erfolgreicher P3a-Pre-Azure-Validierung und geprüftem P3a-Real-Export.**
+> **P3b gilt erst nach erfolgreicher Pre-Azure-Validierung und geprüftem P3b-Real-Export als abgeschlossen.**
 
 ## P4 – Compute
 - [ ] VM-/Disk-/Availability-Daten und Relationships
@@ -743,6 +816,8 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 16. P3/P4 dürfen keine parallelen Sonderwege für Secret-Filtering oder RG-Normalisierung einführen.
 17. Network Connections dürfen `sharedKey` weder abfragen noch exportieren.
 18. Netzwerkbeziehungen werden soweit möglich über Resource IDs und nicht über Namensheuristiken modelliert.
+19. P3b darf Private-Link-Freitext, Application-Gateway-Zertifikatsmaterial, Azure-Firewall-Regelkollektionen oder Firewall-Policy-Zertifikats-/Transport-Security-Daten nicht exportieren, solange hierfür keine separate spätere Sicherheitsentscheidung getroffen wurde.
+20. Synthetische Child-IDs dürfen nur deterministisch unterhalb einer bekannten Azure-Parent-ID erzeugt werden und niemals eine externe Resource-ID erfinden.
 
 ---
 
@@ -795,7 +870,7 @@ P10  Tests / Härtung
 P11  Release 1.0
 ```
 
-**Aktueller nächster Schritt:** Den neuen P3a-Stand über den normalen Ein-Befehl-Start ausführen. Die automatisch eingebettete Pre-Azure-Validierung muss erneut `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` liefern. Mit den sechs neuen Network-Tests werden auf Basis des zuletzt bestätigten Standes 33 erfolgreiche Tests erwartet. Erst danach darf der reale P3a-Azure-Lauf fortgesetzt werden. Anschließend wird `Inventory/network.json` auf Counts, Relationships, RG-Kanonisierung, Schema-Stabilität und Secret-Leakage geprüft.
+**Aktueller nächster Schritt:** Den implementierten P3b-Stand über den normalen Ein-Befehl-Start ausführen. Die automatisch eingebettete Pre-Azure-Validierung muss erneut `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` liefern. Nach den acht neuen P3b-Tests werden auf Basis des zuletzt erwarteten Stands voraussichtlich **8 Testdateien / 46 erfolgreiche Tests** erwartet; diese Zahl gilt erst nach dem lokalen Lauf als bestätigt. Anschließend wird der reale P3b-Export auf P3a-Rückwärtskompatibilität, P3b-Counts, Resource-ID-Relationships, Orphans, Schema-/Array-Stabilität und Secret-/Zertifikats-Leakage geprüft. Erst danach gilt P3b als abgeschlossen und P4 kann beginnen.
 
 ---
 
