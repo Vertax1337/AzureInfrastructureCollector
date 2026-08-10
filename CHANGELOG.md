@@ -38,3 +38,8 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - tenant-specific timestamped export structure
 - `manifest.json`, `summary.json` and collector log
 - initial Pester unit tests
+
+### Fixed
+
+- standalone read-only verification now detects Windows PowerShell 5.1 before loading PowerShell-7-only guard code and exits with a clear `pwsh.exe` retry command instead of failing on unavailable .NET APIs such as `System.IO.Path.GetRelativePath`
+- README test examples now explicitly distinguish `pwsh.exe` from legacy `powershell.exe`
