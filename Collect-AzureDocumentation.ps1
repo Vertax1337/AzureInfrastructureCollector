@@ -19,9 +19,11 @@ $scriptRoot = $PSScriptRoot
 $readOnlyGuardModulePath = Join-Path $scriptRoot 'Modules/Collector.ReadOnlyGuard.psm1'
 $coreModulePath = Join-Path $scriptRoot 'Modules/Collector.Core.psm1'
 $exportSecurityModulePath = Join-Path $scriptRoot 'Modules/Collector.ExportSecurity.psm1'
+$networkModulePath = Join-Path $scriptRoot 'Modules/Collector.Network.psm1'
 $configPath = Join-Path $scriptRoot 'Config/collector.config.json'
 $resourcesQueryPath = Join-Path $scriptRoot 'Queries/Resources.kql'
 $resourceGroupsQueryPath = Join-Path $scriptRoot 'Queries/ResourceGroups.kql'
+$networkQueryPath = Join-Path $scriptRoot 'Queries/Network.kql'
 
 function Write-CollectorStage {
     [CmdletBinding()]
@@ -57,6 +59,7 @@ Write-Host ''
 
 Import-Module $coreModulePath -Force -ErrorAction Stop
 Import-Module $exportSecurityModulePath -Force -ErrorAction Stop
+Import-Module $networkModulePath -Force -ErrorAction Stop
 
 $config = Get-CollectorConfig -Path $configPath
 $prerequisites = Test-CollectorPrerequisites -MinimumPowerShellVersion ([version]$config.requirements.minimumPowerShellVersion) -RequiredModules @($config.requirements.requiredModules)
@@ -91,7 +94,7 @@ $pageSize = [int]$config.resourceGraph.pageSize
 $sensitivePattern = [string]$config.security.sensitivePropertyPattern
 $sensitiveValuePatterns = @($config.security.sensitiveValuePatterns | ForEach-Object { [string]$_ })
 $jsonDepth = [int]$config.export.jsonDepth
-$totalStages = 4
+$totalStages = 5
 
 $publicReadOnlyVerification = New-CollectorPublicReadOnlyVerification -Verification $readOnlyVerification
 $publicReadOnlyVerification = Protect-CollectorExportValue `
@@ -193,16 +196,68 @@ finally {
     Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
 }
 
-Write-CollectorStage -Step 3 -Total $totalStages -Message 'Writing normalized inventory JSON files...'
+$networkInventory = ConvertTo-CollectorNetworkInventory -Rows @()
+Write-CollectorStage -Step 3 -Total $totalStages -Message 'Collecting P3 network topology from Azure Resource Graph...'
+Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Network: waiting for Azure Resource Graph response...'
+try {
+    $networkQuery = Get-Content -LiteralPath $networkQueryPath -Raw -Encoding UTF8
+    $networkRows = @(Invoke-CollectorResourceGraph -Query $networkQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
+    $networkRows = @($networkRows | Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup })
+
+    # Resource Graph can return different Resource Group casing between tables/resource types.
+    # Canonicalize the local network rows against the already normalized RG inventory.
+    foreach ($networkRow in $networkRows) {
+        $canonicalResourceGroup = $resourceGroups |
+            Where-Object {
+                [string]$_.subscriptionId -eq [string]$networkRow.subscriptionId -and
+                [string]$_.name -eq [string]$networkRow.resourceGroup
+            } |
+            Select-Object -First 1
+
+        if ($canonicalResourceGroup) {
+            $networkRow.resourceGroup = [string]$canonicalResourceGroup.name
+        }
+    }
+
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status ("Network: normalizing {0} resource rows and relationships..." -f $networkRows.Count)
+    $networkInventory = ConvertTo-CollectorNetworkInventory -Rows $networkRows
+    $networkInventory = Protect-CollectorExportValue `
+        -Value $networkInventory `
+        -SensitivePropertyPattern $sensitivePattern `
+        -SensitiveValuePatterns $sensitiveValuePatterns
+
+    Write-CollectorLog -Path $run.logPath -Level INFO -Message ("P3 network inventory collected. Source resources: {0}; VNets: {1}; subnets: {2}; NICs: {3}; NSGs: {4}; connections: {5}; relationships: {6}." -f $networkRows.Count, $networkInventory.summary.virtualNetworks, $networkInventory.summary.subnets, $networkInventory.summary.networkInterfaces, $networkInventory.summary.networkSecurityGroups, $networkInventory.summary.connections, $networkInventory.summary.relationships)
+    Write-Host ("[{0}]       Network source resources: {1}" -f (Get-Date).ToString('HH:mm:ss'), $networkRows.Count)
+    Write-Host ("[{0}]       VNets/Subnets/Peerings: {1}/{2}/{3}" -f (Get-Date).ToString('HH:mm:ss'), $networkInventory.summary.virtualNetworks, $networkInventory.summary.subnets, $networkInventory.summary.peerings)
+    Write-Host ("[{0}]       NICs/NSGs/Public IPs: {1}/{2}/{3}" -f (Get-Date).ToString('HH:mm:ss'), $networkInventory.summary.networkInterfaces, $networkInventory.summary.networkSecurityGroups, $networkInventory.summary.publicIpAddresses)
+    Write-Host ("[{0}]       Network relationships: {1}" -f (Get-Date).ToString('HH:mm:ss'), $networkInventory.summary.relationships)
+}
+catch {
+    $errorItem = [pscustomobject][ordered]@{
+        module  = 'Network.P3a'
+        message = $_.Exception.Message
+    }
+    $errors.Add($errorItem)
+    Write-CollectorLog -Path $run.logPath -Level ERROR -Message ("P3 network collection failed: {0}" -f $_.Exception.Message)
+    Write-Warning ("P3 network collection failed: {0}" -f $_.Exception.Message)
+}
+finally {
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
+}
+
+Write-CollectorStage -Step 4 -Total $totalStages -Message 'Writing normalized inventory JSON files...'
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Writing resourceGroups.json...'
 Export-CollectorJson -InputObject @($resourceGroups) -Path (Join-Path $run.inventoryPath 'resourceGroups.json') -Depth $jsonDepth
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Writing resources.json...'
 Export-CollectorJson -InputObject @($resources) -Path (Join-Path $run.inventoryPath 'resources.json') -Depth $jsonDepth
-Write-Host ("[{0}]       Inventory JSON written." -f (Get-Date).ToString('HH:mm:ss'))
+Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Writing network.json...'
+Export-CollectorJson -InputObject $networkInventory -Path (Join-Path $run.inventoryPath 'network.json') -Depth $jsonDepth
+Write-Host ("[{0}]       Inventory JSON written (resourceGroups.json, resources.json, network.json)." -f (Get-Date).ToString('HH:mm:ss'))
 
-Write-CollectorStage -Step 4 -Total $totalStages -Message 'Building summary and manifest...'
+Write-CollectorStage -Step 5 -Total $totalStages -Message 'Building summary and manifest...'
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Building summary.json...'
 $summary = New-CollectorSummary -Resources @($resources) -ResourceGroups @($resourceGroups) -Subscriptions @($selectedSubscriptions) -ResourceGroupFilter $resourceGroupFilter
+Add-Member -InputObject $summary -NotePropertyName network -NotePropertyValue $networkInventory.summary -Force
 $summary = Protect-CollectorExportValue `
     -Value $summary `
     -SensitivePropertyPattern $sensitivePattern `
@@ -222,13 +277,14 @@ Export-CollectorJson -InputObject $manifest -Path (Join-Path $run.rootPath 'mani
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
 
 $duration = $completedAt - $startedAt
-Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Collector completed with status '{0}'. Resources: {1}; resource groups: {2}; errors: {3}; duration: {4}." -f $status, $resources.Count, $resourceGroups.Count, $errors.Count, $duration)
+Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Collector completed with status '{0}'. Resources: {1}; resource groups: {2}; network relationships: {3}; errors: {4}; duration: {5}." -f $status, $resources.Count, $resourceGroups.Count, $networkInventory.summary.relationships, $errors.Count, $duration)
 
 Write-Host ''
 Write-Host 'COLLECTION COMPLETE'
 Write-Host ("Status: {0}" -f $status)
 Write-Host ("Resource Groups: {0}" -f $resourceGroups.Count)
 Write-Host ("Resources: {0}" -f $resources.Count)
+Write-Host ("Network Relationships: {0}" -f $networkInventory.summary.relationships)
 Write-Host ("Errors: {0}" -f $errors.Count)
 Write-Host ("Duration: {0:mm\:ss}" -f $duration)
 Write-Host ("Export completed: {0}" -f $run.rootPath)
