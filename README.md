@@ -32,11 +32,12 @@ The workflow performs, in this order:
 
 1. PowerShell 7.6 LTS runtime check,
 2. initial fail-closed read-only source-code verification,
-3. Pester 5.5.0+ detection,
-4. automatic Pester installation from `PSGallery` with `-Scope CurrentUser` if missing,
-5. complete Pester test suite under `./Tests`,
-6. final fail-closed read-only source-code verification,
-7. explicit final status.
+3. exact Pester **6.0.1** detection,
+4. automatic installation of exactly Pester 6.0.1 from `PSGallery` with `-Scope CurrentUser` if missing,
+5. isolation/import of that exact Pester module version so legacy system Pester versions cannot be mixed into the run,
+6. complete Pester test suite under `./Tests`,
+7. final fail-closed read-only source-code verification,
+8. explicit final status.
 
 A real Azure test is permitted only when the command ends with:
 
@@ -44,13 +45,19 @@ A real Azure test is permitted only when the command ends with:
 PRE-AZURE VALIDATION RESULT
 Status: READY FOR AZURE TEST
 Initial read-only gate: READ-ONLY VERIFIED
-Pester: <version>; Failed: 0
+Pester: 6.0.1; Failed: 0
 Final read-only gate: READ-ONLY VERIFIED
 Azure access performed: NO
 Administrator elevation: NOT USED
 ```
 
 The pre-Azure validation itself does **not** authenticate to Azure and does **not** run the collector.
+
+### Legacy Pester versions
+
+Windows systems can contain an old inbox/system Pester version such as 3.4.0. This does not have to be uninstalled for the collector.
+
+The validator removes already-loaded Pester modules from the current validation session and then imports the exact configured Pester 6.0.1 module path. The test suite uses Pester 6 syntax (`Should -Invoke`) and does not use the removed `Assert-MockCalled` command, preventing PowerShell from auto-loading an old Pester module to satisfy that legacy command.
 
 ## Recommended collector entry point
 
@@ -142,7 +149,7 @@ Runtime:
 - `Az.ResourceGraph`
 - Azure identity with read access to the target scope
 
-Pre-Azure validation additionally requires Pester 5.5.0 or newer. `Invoke-PreAzureValidation.ps1` installs it automatically for `CurrentUser` when missing.
+Pre-Azure validation uses exactly **Pester 6.0.1**, configured as `validation.requiredPesterVersion` in `Config/collector.config.json`. `Invoke-PreAzureValidation.ps1` installs this exact version automatically for `CurrentUser` when missing.
 
 ## Usage
 
@@ -199,7 +206,9 @@ Implemented:
 
 - PowerShell 7.6 LTS runtime baseline
 - dedicated Azure-free pre-Azure validation
-- automatic `CurrentUser` installation of Pester for mandatory validation
+- deterministic Pester 6.0.1 validation runtime
+- Pester 6-compatible test assertions
+- automatic `CurrentUser` installation of the pinned Pester validation version
 - double read-only verification around the Pester suite
 - explicit `READY FOR AZURE TEST` gate status
 - preferred non-elevating bootstrap entry point
