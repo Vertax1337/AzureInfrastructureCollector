@@ -119,36 +119,32 @@ Datenerfassung und spätere KI-/Dokumentgenerierung bleiben getrennt.
 # 2. Ausführungsarchitektur
 
 ```text
-Entwicklung / neuer ausführbarer Stand
-   |
-   v
-Tools/Invoke-PreAzureValidation.ps1
-   |
-   +--> PowerShell 7.6 LTS prüfen
-   +--> Read-only Gate #1
-   +--> exakt Pester 6.0.1 prüfen
-   +--> falls nötig exakt Pester 6.0.1 nur CurrentUser installieren
-   +--> andere geladene Pester-Versionen aus der Session entfernen
-   +--> exakt den Pester-6.0.1-Modulpfad importieren
-   +--> vollständige Pester-Suite
-   +--> Read-only Gate #2
-   |
-   +--> READY FOR AZURE TEST
-            |
-            v
 Start-AzureInfrastructureCollector.ps1
    |
-   +--> PowerShell-Runtime-Preflight
-   +--> Read-only Gate
+   +--> PowerShell 7.6 LTS prüfen
+   +--> automatische eingebettete Pre-Azure-Validierung
+   |      +--> Read-only Gate #1
+   |      +--> exakt Pester 6.0.1 prüfen
+   |      +--> falls nötig exakt Pester 6.0.1 nur CurrentUser installieren
+   |      +--> andere geladene Pester-Versionen aus der Session entfernen
+   |      +--> exakt den Pester-6.0.1-Modulpfad importieren
+   |      +--> vollständige Pester-Suite
+   |      +--> Read-only Gate #2
+   |      +--> READY FOR AZURE TEST oder Fail Closed
+   |
+   +--> Bootstrap Read-only Gate
    +--> Az.Accounts / Az.ResourceGraph prüfen
    +--> fehlende Module nur CurrentUser installieren
+   +--> vorhandenen Azure-Kontext nutzen oder interaktiv authentifizieren
+   +--> Browser/WAM-Login bei Bedarf auf Device Code zurückfallen
    |
    v
 Collect-AzureDocumentation.ps1
    |
    +--> Read-only Gate erneut
-   +--> Azure Auth / lokaler Az-Kontext
+   +--> Tenant / Subscription Scope
    +--> Azure Resource Graph / geprüfte Read-only Cmdlets
+   +--> Normalisierung / Secret-Filtering
    |
    v
 Normalisiertes JSON-Modell
@@ -160,7 +156,7 @@ Normalisiertes JSON-Modell
    +--> Logs
 ```
 
-Die Pre-Azure-Validierung selbst führt **keine Azure-Authentifizierung und keine Azure-Abfrage** durch.
+`Tools/Invoke-PreAzureValidation.ps1` bleibt separat für Diagnose und CI nutzbar. Die Pre-Azure-Validierung selbst führt **keine Azure-Authentifizierung und keine Azure-Abfrage** durch.
 
 ---
 
@@ -246,13 +242,15 @@ Das Gate blockiert unter anderem:
 
 # 4. Pre-Azure-Validierung
 
-Kanonischer Befehl:
+Im normalen Bedienweg wird die komplette Pre-Azure-Validierung automatisch von `Start-AzureInfrastructureCollector.ps1` ausgeführt. Ein separater Operator-Schritt ist nicht erforderlich.
+
+Normaler Start:
 
 ```powershell
-./Tools/Invoke-PreAzureValidation.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-AzureInfrastructureCollector.ps1
 ```
 
-Explizit aus einer anderen Shell:
+Separater Diagnose-/CI-Aufruf:
 
 ```powershell
 pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Invoke-PreAzureValidation.ps1
@@ -293,7 +291,7 @@ Ein realer Azure-Test des aktuellen Standes ist nur zulässig, wenn:
 - finales Gate `READ-ONLY VERIFIED`,
 - Gesamtstatus `READY FOR AZURE TEST`.
 
-Ändert sich anschließend ausführbarer Code oder die Validierungsversion, ist die Freigabe erneut durchzuführen.
+Ändert sich anschließend ausführbarer Code oder die Validierungsversion, erfolgt die Freigabe beim nächsten normalen Start automatisch erneut, bevor Azure angesprochen wird.
 
 `.github/workflows/read-only-gate.yml` verwendet denselben kanonischen Validierungspfad und besitzt nur `contents: read` auf das Repository.
 
@@ -377,6 +375,8 @@ Bootstrap und Collector unterstützen initial:
 - `-OutputPath`,
 - `-NonInteractive`.
 
+Ohne `-ResourceGroup` wird standardmäßig der vollständige Scope der ausgewählten Subscription(s) erfasst. Resource-Group-Filtering ist explizit opt-in und erzeugt im Standardlauf keinen versteckten Eingabeprompt.
+
 Der direkte Aufruf von `Collect-AzureDocumentation.ps1` bleibt für Entwicklung und vorbereitete Systeme möglich; dort müssen Runtime-Dependencies bereits vorhanden sein.
 
 Im `-NonInteractive`-Modus dürfen keine Eingabeprompts erforderlich sein.
@@ -385,7 +385,7 @@ Im `-NonInteractive`-Modus dürfen keine Eingabeprompts erforderlich sein.
 
 # 8. Authentifizierung und Azure-Kontext
 
-Version 1 unterstützt interaktive Anmeldung über `Connect-AzAccount` und vorhandene Az-Kontexte.
+Version 1 unterstützt vorhandene Az-Kontexte und interaktive Anmeldung über `Connect-AzAccount`. Schlägt der normale Browser/WAM-Pfad fehl, verwendet der Bootstrap als Fallback `Connect-AzAccount -UseDeviceAuthentication`; der Kontext bleibt auf `Scope Process` begrenzt.
 
 Später möglich:
 
@@ -472,6 +472,8 @@ Backup -> Protected Resource
 
 Logs enthalten Zeitstempel, Level, Modul/Aktion und Ergebnis; niemals Secrets oder Access Tokens.
 
+Der normale Collector zeigt zusätzlich sichtbare Phasenmeldungen und Objektzähler, damit längere ARG-/Exportvorgänge nicht wie ein stiller Hänger wirken.
+
 Kritische Fehler:
 
 - Read-only-Verifikation fehlgeschlagen,
@@ -533,6 +535,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [x] GitHub Actions Gate implementiert
 - [x] initiale manuelle/statische Verifikation
 - [x] lokaler standalone Read-only-Gate-Lauf mit `READ-ONLY VERIFIED` auf vorherigem Stand
+- [x] realer Collector-Lauf bestätigt erneut ausschließlich freigegebene Read-only-Pfade
 
 ## P0b – Bootstrap / Dependencies
 - [x] `Start-AzureInfrastructureCollector.ps1`
@@ -546,6 +549,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [x] keine automatische Repository-Mutation
 - [x] Bootstrap-Tests implementiert
 - [x] Read-only-Gate um Bootstrap-Grenze erweitert
+- [x] interaktiver Login mit vorhandener Account-Auswahl im Real-Run bestätigt
 
 ## P0c – Pre-Azure Validation
 - [x] `Tools/Invoke-PreAzureValidation.ps1`
@@ -558,7 +562,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [x] finales Read-only-Gate
 - [x] eindeutiger Status `READY FOR AZURE TEST`
 - [x] GitHub Actions auf denselben kanonischen Pfad umstellen
-- [ ] lokaler Lauf unter PowerShell 7.6 LTS liefert `READY FOR AZURE TEST`
+- [x] automatische lokale Validierung unter PowerShell 7.6.4: Pester 6.0.1, 19/19 Tests, beide Gates `READ-ONLY VERIFIED`
 
 ## P1 – Core
 - [x] Collector-Einstieg
@@ -566,6 +570,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [x] Tenant-/Subscription-Auswahl
 - [x] RG-Scope
 - [x] Output / Logging / Manifest-Grundstruktur
+- [x] sichtbare Phasen-/Fortschrittsausgabe im Collector
 - [ ] Exit Codes vollständig im Collector harmonisieren
 - [ ] Read-only-Status vollständig in Manifest integrieren
 
@@ -577,7 +582,8 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [x] Multi-Subscription
 - [x] stabile Normalisierung/Sortierung
 - [x] Summary
-- [ ] realer Integrationstest
+- [x] erster realer Integrationstest: 1 Subscription, 12 Resource Groups, 134 Ressourcen, 0 Fehler, `Success`, Laufzeit 00:03
+- [ ] Exportinhalt fachlich gegen Azure-Iststand stichprobenartig validieren
 
 ## P3 – Netzwerk
 - [ ] Netzwerkobjekte und Relationships
@@ -631,7 +637,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 10. Unterstützte Runtime ist PowerShell 7.6 LTS oder neuer, solange eine spätere Version explizit verifiziert ist.
 11. Pester ist für die Pre-Azure-Validierung exakt auf 6.0.1 gepinnt; Versionsänderungen benötigen erneute Verifikation.
 12. Keine automatische PowerShell-Repository-Mutation.
-13. Vor realen Azure-Läufen muss der aktuelle Stand `READY FOR AZURE TEST` erreichen.
+13. Vor realen Azure-Läufen muss der aktuelle Stand `READY FOR AZURE TEST` erreichen; im normalen Startpfad wird dies automatisch erzwungen.
 14. Architektur-/Scope-Änderungen werden zuerst in diesem Dokument festgelegt.
 
 ---
@@ -683,7 +689,7 @@ P10  Tests / Härtung
 P11  Release 1.0
 ```
 
-**Vor dem ersten realen Azure-Test ist ausschließlich der lokale erfolgreiche Lauf von `Tools/Invoke-PreAzureValidation.ps1` unter PowerShell 7.6 LTS mit `Status: READY FOR AZURE TEST` offen.**
+**Aktueller nächster Schritt:** Den erfolgreichen Real-Export fachlich und strukturell prüfen (`manifest.json`, `summary.json`, `Inventory/resourceGroups.json`, `Inventory/resources.json`, `readOnlyVerification.json`, Logs), insbesondere gegen den Azure-Iststand und auf unerwünschte sensitive Inhalte. Erst danach wird P2 als fachlich validiert betrachtet und die Detailmodule P3/P4 werden ausgebaut.
 
 ---
 
