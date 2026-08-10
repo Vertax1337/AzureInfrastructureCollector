@@ -9,7 +9,142 @@
 
 ---
 
-## 1. Zweck dieses Dokuments
+# 0. OBERSTE REGEL – READ-ONLY MUSS VOR JEDER AUSFÜHRUNGSFREIGABE VERIFIZIERT SEIN
+
+> **Diese Regel hat Vorrang vor allen anderen Anforderungen, Architekturentscheidungen, Features, Entwicklungszielen und Zeitplänen dieses Projekts.**
+
+Der **AzureInfrastructureCollector darf unter keinen Umständen Azure-Ressourcen, Azure-Konfigurationen, Datenbestände oder Azure-seitige Zustände verändern.**
+
+Ein Skriptstand, Modul, Hotfix, Testskript oder ausführbarer Code darf **erst dann zur Ausführung freigegeben bzw. an einen Benutzer zur Ausführung ausgegeben werden, wenn unmittelbar zuvor eine abschließende Read-only-Verifikation durchgeführt wurde und das Ergebnis eindeutig `READ-ONLY VERIFIED` lautet.**
+
+Kann Read-only nicht zweifelsfrei bestätigt werden, gilt der Stand als **nicht freigegeben** und darf nicht zur Ausführung empfohlen oder ausgegeben werden.
+
+## 0.1 Was Read-only in diesem Projekt bedeutet
+
+Zulässig sind ausschließlich Operationen, die Informationen lesen, lokale Verarbeitung durchführen oder lokale Exportdateien erzeugen.
+
+Zulässig sind insbesondere:
+
+- Azure Resource Graph Abfragen,
+- Azure REST-Aufrufe mit rein lesender Semantik, insbesondere `GET`,
+- Azure PowerShell Cmdlets, deren konkrete Verwendung nachweislich nur Daten liest,
+- lokale Normalisierung und Verarbeitung der gelesenen Daten,
+- lokale Erstellung von JSON-, Log-, Manifest-, Summary- und ZIP-Dateien,
+- Authentifizierung gegen Azure,
+- Auswahl bzw. Änderung des **lokalen PowerShell-/Az-Kontexts**, sofern dadurch keine Azure-Ressource geändert wird.
+
+Daher sind beispielsweise `Connect-AzAccount` und `Set-AzContext` grundsätzlich zulässig, weil sie den Authentifizierungs- bzw. lokalen Ausführungskontext steuern und keine Azure-Ressource verändern.
+
+## 0.2 Verbotene Azure-seitige Wirkungen
+
+Nicht zulässig sind insbesondere Azure-Operationen, die:
+
+- Ressourcen erstellen,
+- Ressourcen löschen,
+- Ressourcen verändern,
+- Ressourcen starten oder stoppen,
+- VMs neu starten oder deallokieren,
+- Netzwerkregeln verändern,
+- RBAC-Zuweisungen verändern,
+- Policies verändern,
+- Locks verändern,
+- Tags auf Azure-Ressourcen verändern,
+- Backup-Konfigurationen verändern,
+- Monitoring-Konfigurationen verändern,
+- Automation-Konfigurationen verändern,
+- Secrets, Keys oder Zertifikate erzeugen, verändern oder rotieren,
+- Daten in Azure Storage, Datenbanken, Key Vaults oder andere Azure-Dienste schreiben,
+- Deployments auslösen,
+- Provider-Aktionen mit schreibender oder zustandsverändernder Wirkung ausführen.
+
+## 0.3 Keine reine Verb-Prüfung
+
+Read-only darf **nicht ausschließlich anhand des PowerShell-Verbs** beurteilt werden.
+
+Ein pauschales Verbot aller `Set-*`-Cmdlets wäre technisch falsch, weil beispielsweise `Set-AzContext` lediglich den lokalen Kontext setzt. Umgekehrt kann ein Cmdlet mit einem scheinbar harmlosen Verb über Parameter oder eine REST/API-Funktion dennoch einen Azure-seitigen Zustand verändern.
+
+Die Verifikation muss daher die **konkrete Wirkung der verwendeten Operation** bewerten.
+
+## 0.4 Fail-Closed-Prinzip
+
+Für die Read-only-Verifikation gilt **Fail Closed**:
+
+- eindeutig lesend verifiziert -> zulässig,
+- eindeutig lokal ohne Azure-Ressourcenänderung -> zulässig,
+- unbekannt -> blockieren,
+- unklar -> blockieren,
+- potenziell schreibend -> blockieren,
+- schreibend -> blockieren.
+
+Eine unbekannte Azure-Operation darf niemals mit der Annahme "wird schon lesend sein" freigegeben werden.
+
+## 0.5 Pflichtprüfung vor jeder Ausführungsfreigabe
+
+Vor jeder Ausgabe eines ausführbaren Standes müssen mindestens folgende Punkte geprüft werden:
+
+1. alle PowerShell-Dateien des ausführbaren Scopes,
+2. alle verwendeten Azure PowerShell Cmdlets,
+3. alle direkten Azure REST/API-Aufrufe,
+4. alle dynamisch zusammengesetzten Cmdlet- oder API-Aufrufe,
+5. alle eingebundenen Module und Skripte des Projekts,
+6. alle KQL-Abfragen,
+7. alle Codepfade, die durch Parameter aktiviert werden können,
+8. alle Fehler-/Fallback-Pfade,
+9. alle optionalen Module, die beim konkreten Lauf geladen werden können,
+10. alle Änderungen seit der letzten bestätigten Read-only-Verifikation.
+
+Die Prüfung muss sicherstellen, dass keine Azure-Control-Plane- oder Data-Plane-Schreiboperation enthalten oder erreichbar ist.
+
+## 0.6 Verbindlicher Verifikationsstatus
+
+Ein freigegebener Stand muss vor der Ausführung sinngemäß mit folgendem Status bestätigt werden können:
+
+```text
+READ-ONLY VERIFICATION
+Status: READ-ONLY VERIFIED
+Azure resource mutations: NONE
+Azure data mutations: NONE
+Control-plane write operations: NONE
+Data-plane write operations: NONE
+Local writes: Export/Logs only
+```
+
+Der genaue technische Prüfbericht darf später erweitert werden. Der Status `READ-ONLY VERIFIED` darf jedoch nur gesetzt werden, wenn alle relevanten Prüfungen erfolgreich sind.
+
+## 0.7 Automatisches Read-only-Gate
+
+Der Collector soll zusätzlich zu Code-Reviews ein automatisches **Read-only-Gate** erhalten.
+
+Ziel:
+
+```text
+Code / Module
+     |
+     v
+Read-only Verification Gate
+     |
+     +-- VERIFIED ------> Ausführung zulässig
+     |
+     +-- UNKNOWN/FAIL --> Ausführung blockiert
+```
+
+Das Gate soll vor Beginn der eigentlichen Azure-Inventarisierung ausgeführt werden und bei einer nicht zulässigen oder unbekannten Operation den Lauf abbrechen.
+
+Automatische Prüfungen ersetzen dabei **nicht** die abschließende fachliche Prüfung eines neuen oder veränderten Azure-Aufrufs.
+
+## 0.8 Änderungen an dieser Regel
+
+Diese oberste Regel darf nicht beiläufig im Rahmen einer Feature-Entwicklung aufgeweicht werden.
+
+Eine Änderung, Ausnahme oder Erweiterung, die Azure-seitige Schreiboperationen ermöglichen würde, erfordert eine **explizite Entscheidung des Projektverantwortlichen/Nutzers und eine bewusste Änderung dieser Source of Truth vor der Implementierung**.
+
+Bis dahin gilt ausnahmslos:
+
+> **Keine bestätigte Read-only-Verifikation = keine Ausführungsfreigabe.**
+
+---
+
+# 1. Zweck dieses Dokuments
 
 Diese Datei ist die **verbindliche Source of Truth** für die Entwicklung des Projekts **AzureInfrastructureCollector**.
 
@@ -25,13 +160,13 @@ Sie beschreibt:
 - Abnahmekriterien,
 - sowie geplante spätere Erweiterungen.
 
-### 1.1 Verbindlichkeit
+## 1.1 Verbindlichkeit
 
 Bei Abweichungen zwischen Implementierung, Issue, Chat-Verlauf, README oder sonstiger Dokumentation gilt grundsätzlich dieser Umsetzungsplan.
 
-Änderungen an Architektur, Scope oder technischen Grundentscheidungen sollen **zuerst in dieser Datei dokumentiert** und anschließend implementiert werden.
+Die **oberste Read-only-Regel aus Kapitel 0 hat innerhalb dieses Dokuments wiederum Vorrang vor allen anderen Festlegungen.**
 
-Das Dokument soll mit dem Projekt fortlaufend versioniert werden und nachvollziehbar machen, warum bestimmte Entscheidungen getroffen wurden.
+Änderungen an Architektur, Scope oder technischen Grundentscheidungen sollen zuerst in dieser Datei dokumentiert und anschließend implementiert werden.
 
 ---
 
@@ -39,9 +174,9 @@ Das Dokument soll mit dem Projekt fortlaufend versioniert werden und nachvollzie
 
 Der **AzureInfrastructureCollector** soll Azure-Infrastrukturen automatisiert, reproduzierbar und ausschließlich lesend inventarisieren.
 
-Das Werkzeug soll insbesondere für wiederkehrende Kundendokumentationen geeignet sein und darf deshalb **keine kundenspezifischen Annahmen oder fest codierten Tenant-, Subscription-, Resource-Group- oder Ressourcennamen enthalten**.
+Das Werkzeug soll für wiederkehrende Kundendokumentationen geeignet sein und darf deshalb keine kundenspezifischen Annahmen oder fest codierten Tenant-, Subscription-, Resource-Group- oder Ressourcennamen enthalten.
 
-Der Collector soll eine Azure-Umgebung in ein strukturiertes, maschinenlesbares Exportformat überführen, das anschließend als Grundlage für:
+Der Collector soll eine Azure-Umgebung in ein strukturiertes, maschinenlesbares Exportformat überführen, das anschließend als Grundlage für folgende Aufgaben dienen kann:
 
 - technische Bestandsdokumentationen,
 - Architekturdiagramme,
@@ -50,9 +185,7 @@ Der Collector soll eine Azure-Umgebung in ein strukturiertes, maschinenlesbares 
 - Änderungsvergleiche,
 - Sicherheitsanalysen,
 - Betriebsdokumentationen,
-- sowie Word-/PDF-Dokumente
-
-dienen kann.
+- Word-/PDF-Dokumente.
 
 ## 2.1 Zielbild
 
@@ -83,7 +216,7 @@ Azure Tenant / Subscription(s)
             +--> Versionsvergleich
 ```
 
-Die **Datenerfassung** und die spätere **KI-Auswertung/Dokumentgenerierung** sind bewusst getrennte Komponenten.
+Datenerfassung und spätere KI-Auswertung/Dokumentgenerierung sind bewusst getrennte Komponenten.
 
 ---
 
@@ -91,19 +224,7 @@ Die **Datenerfassung** und die spätere **KI-Auswertung/Dokumentgenerierung** si
 
 ## 3.1 Kundengenerisch
 
-Der Collector darf keine fest programmierten Kundenwerte enthalten.
-
-Alle relevanten Informationen werden zur Laufzeit ermittelt oder als optionale Parameter übergeben.
-
-Beispiele:
-
-- Tenant-ID
-- Subscription-ID
-- Resource Group
-- Region
-- Ressourcennamen
-- Tags
-- Naming-Konventionen
+Der Collector darf keine fest programmierten Kundenwerte enthalten. Tenant-ID, Subscription-ID, Resource Groups, Regionen, Ressourcennamen, Tags und Naming-Konventionen werden zur Laufzeit ermittelt oder optional als Parameter übergeben.
 
 ## 3.2 Tenantfähig
 
@@ -114,36 +235,22 @@ Der Collector soll:
 1. verfügbare Tenants erkennen,
 2. eine Tenant-Auswahl ermöglichen,
 3. verfügbare Subscriptions innerhalb des ausgewählten Tenants erkennen,
-4. auf Wunsch mehrere Subscriptions erfassen,
+4. mehrere Subscriptions erfassen können,
 5. optional auf einzelne Resource Groups eingeschränkt werden können.
 
-Die tatsächlich sichtbaren Ressourcen ergeben sich ausschließlich aus den Berechtigungen des angemeldeten Kontos bzw. der verwendeten Service Identity.
+Die tatsächlich sichtbaren Ressourcen ergeben sich ausschließlich aus den Berechtigungen der verwendeten Identität.
 
 ## 3.3 Read-only by Design
 
-Der Collector darf **keine Azure-Ressourcen verändern**.
+Read-only by Design ist nicht nur ein Architekturprinzip, sondern unterliegt der übergeordneten Pflicht aus Kapitel 0.
 
-Nicht zulässig sind insbesondere:
-
-- Erstellen von Ressourcen,
-- Löschen von Ressourcen,
-- Ändern von Konfigurationen,
-- Starten oder Stoppen von VMs,
-- Ändern von RBAC-Zuweisungen,
-- Ändern von Policies,
-- Ändern von Netzwerkregeln,
-- Erzeugen oder Rotieren von Secrets,
-- Verändern von Backup- oder Monitoring-Konfigurationen.
-
-Alle Azure-Zugriffe sind lesend zu implementieren.
+Alle Azure-Zugriffe sind lesend zu implementieren. Keine Azure-Ressource darf durch den Collector verändert werden.
 
 ## 3.4 Least Privilege
 
-Das Werkzeug soll mit möglichst geringen Berechtigungen funktionieren.
+Das Werkzeug soll mit möglichst geringen Berechtigungen funktionieren. Für die reine Ressourceninventarisierung ist grundsätzlich Reader-orientierter Zugriff vorzusehen.
 
-Für die reine Ressourceninventarisierung ist grundsätzlich ein Reader-orientierter Zugriff vorzusehen.
-
-Bereiche, die zusätzliche Leserechte benötigen, müssen sauber erkannt und als **nicht verfügbar** protokolliert werden, anstatt den gesamten Export fehlschlagen zu lassen.
+Bereiche, die zusätzliche Leserechte benötigen, müssen als nicht verfügbar protokolliert werden, anstatt den gesamten Export unnötig fehlschlagen zu lassen.
 
 ## 3.5 Keine Secrets im Export
 
@@ -160,30 +267,17 @@ Folgende Daten dürfen niemals bewusst exportiert werden:
 - API Keys,
 - sonstige Credential-Werte.
 
-Falls Azure-APIs entsprechende Properties zurückgeben könnten, müssen diese vor Speicherung entfernt oder maskiert werden.
+Potentiell sensitive Properties müssen vor Speicherung entfernt oder maskiert werden.
 
 ## 3.6 Reproduzierbarkeit
 
-Zwei Läufe auf derselben unveränderten Infrastruktur sollen strukturell vergleichbare Ergebnisse erzeugen.
-
-Dazu gehören:
-
-- stabiles JSON-Schema,
-- konsistente Dateinamen,
-- definierte Sortierung,
-- ISO-8601-Zeitstempel,
-- eindeutige Resource IDs,
-- Collector-Version im Manifest.
+Zwei Läufe auf derselben unveränderten Infrastruktur sollen strukturell vergleichbare Ergebnisse erzeugen. Dazu gehören stabiles JSON-Schema, konsistente Dateinamen, definierte Sortierung, ISO-8601-Zeitstempel, Resource IDs und Collector-Version im Manifest.
 
 ## 3.7 Best Effort statt Totalabbruch
 
-Fehlt für einen einzelnen Bereich die Berechtigung oder schlägt eine Detailabfrage fehl, soll der Collector nach Möglichkeit fortfahren.
+Fehlt für einen einzelnen Erfassungsbereich die Berechtigung oder schlägt eine Detailabfrage fehl, soll der Collector nach Möglichkeit fortfahren. Fehler werden protokolliert, einem Modul zugeordnet und im Manifest bzw. Summary kenntlich gemacht.
 
-Fehler werden:
-
-- protokolliert,
-- dem betroffenen Modul zugeordnet,
-- im Manifest bzw. Summary kenntlich gemacht.
+**Ausnahme:** Eine fehlgeschlagene Read-only-Verifikation ist immer ein kritischer Fehler und muss den Lauf abbrechen.
 
 ---
 
@@ -193,67 +287,30 @@ Fehler werden:
 
 Initiale Implementierung:
 
-- **PowerShell 7.x**
-- Azure PowerShell / `Az.*`
-- Azure Resource Graph / `Search-AzGraph`
-- JSON als primäres Austauschformat
+- PowerShell 7.x,
+- Azure PowerShell / `Az.*`,
+- Azure Resource Graph / `Search-AzGraph`,
+- JSON als primäres Austauschformat.
 
-Windows PowerShell 5.1 ist kein primäres Entwicklungsziel, sofern dafür moderne Funktionen oder Module eingeschränkt werden müssten.
+Windows PowerShell 5.1 ist kein primäres Entwicklungsziel.
 
 ## 4.2 Resource Graph First
 
-Azure Resource Graph ist die bevorzugte Quelle für breit angelegte Inventarisierung.
-
-Resource Graph soll insbesondere verwendet werden für:
-
-- allgemeine Ressourceninventarisierung,
-- Ressourcentypen,
-- Resource Groups,
-- Regionen,
-- Tags,
-- Resource IDs,
-- Compute-Basisdaten,
-- Netzwerk-Basisdaten,
-- Storage-Basisdaten,
-- Beziehungen, soweit über Properties/IDs ableitbar.
+Azure Resource Graph ist die bevorzugte Quelle für breit angelegte Inventarisierung, insbesondere für allgemeine Ressourcen, Resource Groups, Regionen, Tags, Resource IDs und breite Compute-/Network-/Storage-Basisdaten.
 
 ## 4.3 Az PowerShell / REST für Detaildaten
 
-`Az.*`-Cmdlets oder Azure REST APIs werden dort verwendet, wo Resource Graph:
+`Az.*`-Cmdlets oder Azure REST APIs werden dort verwendet, wo Resource Graph erforderliche Details nicht liefert, z. B. AVD, Backup, Automation, Diagnostic Settings, Monitoring oder Berechtigungsdetails.
 
-- Daten nicht liefert,
-- relevante Details nicht vollständig liefert,
-- oder ein Spezialdienst eigene APIs benötigt.
-
-Beispiele:
-
-- Azure Virtual Desktop,
-- Backup,
-- Automation Accounts / Runbooks,
-- Diagnostic Settings,
-- bestimmte Monitoringinformationen,
-- Rollen und Berechtigungsdetails,
-- Detailkonfiguration einzelner Dienste.
+Jeder neu eingeführte Azure-Aufruf muss vor Freigabe gemäß Kapitel 0 auf seine tatsächliche Read-only-Wirkung geprüft werden.
 
 ## 4.4 Normalisierungsschicht
 
-Die Ausgabe der unterschiedlichen Azure-Quellen soll nicht ungefiltert als alleinige Dokumentationsbasis verwendet werden.
-
-Zwischen Erfassung und Export liegt eine Normalisierungsschicht.
-
-Ziele:
-
-- gleiche Namenskonventionen,
-- stabile Felder,
-- Resource IDs als Referenzschlüssel,
-- Beziehungen zwischen Ressourcen,
-- konsistente Datentypen,
-- Secret Filtering,
-- Sortierung.
+Zwischen Erfassung und Export liegt eine Normalisierungsschicht mit stabilen Feldern, Resource IDs als Referenzschlüssel, konsistenten Datentypen, Secret Filtering und definierter Sortierung.
 
 ---
 
-# 5. Geplante Repository-Struktur
+# 5. Repository-Struktur
 
 ```text
 AzureInfrastructureCollector/
@@ -313,20 +370,21 @@ Der zentrale Einstiegspunkt ist:
 ./Collect-AzureDocumentation.ps1
 ```
 
-Dieses Skript übernimmt:
+Er übernimmt:
 
 1. Prüfung der Voraussetzungen,
-2. Azure-Anmeldung bzw. Kontextprüfung,
-3. Tenant-Auswahl,
-4. Scope-Auswahl,
-5. Initialisierung der Module,
-6. Datenerfassung,
-7. Normalisierung,
-8. Validierung,
-9. Export,
-10. Zusammenfassung des Laufs.
+2. **Read-only-Verifikation des ausführbaren Scopes**, 
+3. Azure-Anmeldung bzw. Kontextprüfung,
+4. Tenant-Auswahl,
+5. Scope-Auswahl,
+6. Initialisierung der Module,
+7. Datenerfassung,
+8. Normalisierung,
+9. Validierung,
+10. Export,
+11. Zusammenfassung.
 
-Die eigentliche Fachlogik wird möglichst nicht direkt im Einstiegsskript implementiert, sondern in Modulen gekapselt.
+Die Fachlogik wird möglichst in Modulen gekapselt.
 
 ---
 
@@ -334,51 +392,16 @@ Die eigentliche Fachlogik wird möglichst nicht direkt im Einstiegsskript implem
 
 ## 7.1 Interaktiver Modus
 
-Standardaufruf:
-
 ```powershell
 ./Collect-AzureDocumentation.ps1
 ```
 
-Der Benutzer wird geführt durch:
-
-1. Azure-Anmeldung bzw. Auswahl eines vorhandenen Kontexts,
-2. Tenant-Auswahl,
-3. Subscription-Auswahl,
-4. optionale Resource-Group-Auswahl,
-5. Exportziel,
-6. Start der Inventarisierung.
-
-Beispiel:
-
-```text
-Azure Infrastructure Documentation Collector
-
-Verfügbare Tenants:
-
-[1] Kunde A
-[2] Kunde B
-[3] MSP Tenant
-
-Tenant auswählen: 1
-
-Subscriptions:
-[X] Production
-[X] Shared Services
-[ ] Test
-
-Scope:
-[1] Ausgewählte Subscriptions vollständig
-[2] Bestimmte Resource Groups
-
-Auswahl: 1
-```
+Der Benutzer wird durch Azure-Kontext, Tenant-Auswahl, Subscription-Auswahl, optionale Resource-Group-Auswahl und Export geführt.
 
 ## 7.2 Tenant explizit vorgeben
 
 ```powershell
-./Collect-AzureDocumentation.ps1 `
-    -TenantId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+./Collect-AzureDocumentation.ps1 -TenantId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
 ## 7.3 Subscription explizit vorgeben
@@ -393,8 +416,6 @@ Mehrere Subscription IDs sollen unterstützt werden.
 
 ## 7.4 Resource Groups einschränken
 
-Geplant:
-
 ```powershell
 ./Collect-AzureDocumentation.ps1 `
     -TenantId "..." `
@@ -404,8 +425,6 @@ Geplant:
 
 ## 7.5 NonInteractive
 
-Für spätere Automatisierung:
-
 ```powershell
 ./Collect-AzureDocumentation.ps1 `
     -TenantId "..." `
@@ -414,29 +433,19 @@ Für spätere Automatisierung:
     -NonInteractive
 ```
 
-Der NonInteractive-Modus darf keine Eingaben über `Read-Host` oder vergleichbare Mechanismen verlangen.
+Der NonInteractive-Modus darf keine Eingaben über `Read-Host` verlangen.
 
 ---
 
 # 8. Authentifizierung und Azure-Kontext
 
-## 8.1 Version 1
+Version 1 unterstützt interaktive Anmeldung über `Connect-AzAccount` und soll vorhandene Azure-Kontexte wiederverwenden.
 
-Version 1 unterstützt interaktive Azure-Anmeldung über `Connect-AzAccount`.
+Später sollen Managed Identity, Service Principal, Azure Automation und CI/CD unterstützt werden können.
 
-Der Collector soll vorhandene Azure-Kontexte erkennen und nach Möglichkeit wiederverwenden.
+Credentials dürfen niemals im Repository hinterlegt werden.
 
-## 8.2 Spätere Automatisierung
-
-Die Architektur soll bereits ermöglichen, später zusätzlich zu unterstützen:
-
-- Managed Identity,
-- Service Principal,
-- Azure Automation,
-- CI/CD-Workflows,
-- geplante Scheduled Runs.
-
-Credentials dürfen niemals in Konfigurationsdateien des Repositories hinterlegt werden.
+Authentifizierung und lokales Context-Switching gelten nur dann als zulässig, wenn sie keine Azure-Ressource oder Azure-Daten verändern.
 
 ---
 
@@ -455,9 +464,7 @@ Tenant
          +-- Resource Group 3
 ```
 
-Ein späterer Batch-Modus kann nacheinander mehrere Tenants erfassen. Die Ergebnisse unterschiedlicher Tenants bleiben getrennt.
-
-Ein gemeinsamer Export, der Ressourcen mehrerer Tenants ununterscheidbar vermischt, ist nicht zulässig.
+Ein späterer Batch-Modus kann mehrere Tenants nacheinander erfassen. Ergebnisse verschiedener Tenants bleiben getrennt.
 
 ---
 
@@ -465,391 +472,216 @@ Ein gemeinsamer Export, der Ressourcen mehrerer Tenants ununterscheidbar vermisc
 
 ## 10.1 Core / Tenant / Subscription
 
-Zu erfassen:
-
-- Tenant ID
-- Tenant Display Name, soweit verfügbar
-- Subscription ID
-- Subscription Name
-- Subscription State
-- Resource Groups
-- Regionen
-- Ressourcenanzahl
-- Ressourcentypen
-- Tags
-- Resource IDs
+- Tenant ID / Display Name,
+- Subscription ID / Name / State,
+- Resource Groups,
+- Regionen,
+- Ressourcenanzahl,
+- Ressourcentypen,
+- Tags,
+- Resource IDs.
 
 ## 10.2 Compute
 
-Zu erfassen, soweit verfügbar:
-
-- Virtual Machines
-- VM Name
-- Resource ID
-- Resource Group
-- Region
-- VM Size / SKU
-- OS Type
-- Publisher/Image-Informationen, soweit verfügbar
-- Availability Zone / Availability Set
-- NIC-Zuordnungen
-- Managed Disks
-- OS Disk
-- Data Disks
-- Disk SKU
-- Disk Size
-- Boot Diagnostics Status, soweit auslesbar
-- Power State optional als Momentaufnahme
-
-Der Power State ist ein zeitabhängiger Betriebswert und muss als solcher gekennzeichnet werden.
+- Virtual Machines,
+- VM Size / SKU,
+- OS Type,
+- Image-Informationen,
+- Availability Zone / Set,
+- NIC-Zuordnungen,
+- Managed Disks,
+- OS-/Data-Disks,
+- Disk SKU / Size,
+- Boot Diagnostics Status,
+- optional Power State als Momentaufnahme.
 
 ## 10.3 Netzwerk
 
-Zu erfassen:
-
-- Virtual Networks
-- Address Spaces
-- Subnets
-- Subnet Address Prefixes
-- VNet Peerings
-- Network Interfaces
-- IP Configurations
-- Private IPs
-- Public IP Associations
-- Public IP Resources
-- Network Security Groups
-- NSG Associations
-- NSG Rules
-- Route Tables
-- Routes
-- NAT Gateways
-- Load Balancer Basisinformationen
-- Application Gateway Basisinformationen
-- VPN / Virtual Network Gateways
-- Local Network Gateways
-- Private Endpoints
-- Private Link Beziehungen
-- Azure Firewall, sofern vorhanden
-- Private DNS Zones
-- VNet Links zu Private DNS Zones
+- VNets / Address Spaces,
+- Subnets,
+- Peerings,
+- NICs / IP Configurations,
+- Private / Public IPs,
+- NSGs / Rules / Associations,
+- Route Tables / Routes,
+- NAT Gateways,
+- Load Balancer,
+- Application Gateway,
+- VPN / Virtual Network Gateways,
+- Local Network Gateways,
+- Private Endpoints / Private Link,
+- Azure Firewall,
+- Private DNS Zones / VNet Links.
 
 ## 10.4 Storage
 
-Zu erfassen:
-
-- Storage Accounts
-- Storage Account Type/SKU
-- Region
-- Public Network Access Status
-- Minimum TLS Version, soweit verfügbar
-- HTTPS-only Status
-- Network ACL Basisinformationen
-- Private Endpoints
-- File Shares / Blob Container nur soweit sinnvoll und ohne Inhaltsdaten
+- Storage Accounts,
+- SKU / Region,
+- Public Network Access,
+- TLS-/HTTPS-Konfiguration,
+- Network ACL Basisinformationen,
+- Private Endpoints,
+- File Shares / Blob Container nur soweit sinnvoll und ohne Inhaltsdaten.
 
 Keine Dateiinhalte oder Blob-Inhalte werden erfasst.
 
 ## 10.5 Azure Virtual Desktop
 
-Zu erfassen:
+- Workspaces,
+- Host Pools,
+- Application Groups,
+- Workspace-Zuordnungen,
+- Session Hosts,
+- Session Host Status,
+- VM Resource IDs,
+- Load Balancing Type,
+- Host Pool Type,
+- Max Session Limit,
+- Validation Environment,
+- Start VM on Connect,
+- Scaling Plans / Zuordnungen.
 
-- Workspaces
-- Host Pools
-- Application Groups
-- Workspace-Zuordnungen
-- Session Hosts
-- Session Host Status
-- Session Host VM Resource IDs, soweit ableitbar
-- Load Balancing Type
-- Host Pool Type
-- Max Session Limit
-- Validation Environment
-- Start VM on Connect
-- Scaling Plans
-- Scaling-Plan-Zuordnungen
-
-Benutzerbezogene Sessiondaten sind nicht Kernbestandteil der Infrastrukturinventarisierung und sollen standardmäßig nicht dauerhaft exportiert werden.
+Benutzerbezogene Sessiondaten sollen standardmäßig nicht dauerhaft exportiert werden.
 
 ## 10.6 Backup / Recovery
 
-Zu erfassen, soweit Berechtigungen dies ermöglichen:
-
-- Recovery Services Vaults
-- Backup Vaults
-- Backup Policies
-- geschützte Ressourcen
-- grundlegende Retention-Konfigurationen
-- Soft Delete Status
-- Immutable-Konfiguration, soweit verfügbar
-- Resource Guard Beziehungen, soweit vorhanden
+- Recovery Services Vaults,
+- Backup Vaults,
+- Backup Policies,
+- geschützte Ressourcen,
+- Retention-Grundkonfigurationen,
+- Soft Delete,
+- Immutable-Konfiguration,
+- Resource Guard Beziehungen.
 
 Keine Backup-Inhalte werden exportiert.
 
 ## 10.7 Security / Governance
 
-Zu erfassen:
+- Azure RBAC Role Assignments,
+- Scopes,
+- Role Definition Name/ID,
+- Principal ID / Type,
+- Resource Locks,
+- Policy Assignments / Initiatives,
+- Defender for Cloud Basisinformationen, soweit mit Leserechten verfügbar.
 
-- Azure RBAC Role Assignments
-- Scope der Role Assignments
-- Role Definition Name/ID
-- Principal ID
-- Principal Type, soweit verfügbar
-- Resource Locks
-- Azure Policy Assignments
-- Policy Initiative Assignments
-- Defender for Cloud / Security Basisinformationen, sofern ohne erhöhte Rechte verfügbar
-
-### Datenschutz bei Identitäten
-
-Personenbezogene Informationen wie vollständige Benutzerprofile sollen nur soweit technisch notwendig exportiert werden.
-
-Primäre Referenz bleibt die Azure/Entra Principal ID. Klarnamen oder UPNs sollen optional bzw. konfigurierbar behandelt werden, falls deren Erfassung zusätzliche Graph-Berechtigungen benötigen würde.
+Personenbezogene Identitätsinformationen werden minimiert; primäre Referenz bleibt die Principal ID.
 
 ## 10.8 Monitoring
 
-Zu erfassen:
-
-- Log Analytics Workspaces
-- Diagnostic Settings
-- Diagnostic Destinations
-- Action Groups
-- Metric Alerts
-- Activity Log Alerts
-- grundlegende Monitoring-Zuordnungen
+- Log Analytics Workspaces,
+- Diagnostic Settings / Destinations,
+- Action Groups,
+- Metric Alerts,
+- Activity Log Alerts.
 
 Keine eigentlichen Log-Inhalte werden standardmäßig exportiert.
 
 ## 10.9 Automation
 
-Zu erfassen:
+- Automation Accounts,
+- Runbook-Metadaten,
+- Typ / Veröffentlichungsstatus,
+- Schedules,
+- Schedule-/Runbook-Verknüpfungen,
+- Managed Identity Status.
 
-- Automation Accounts
-- Runbook-Metadaten
-- Runbook-Typ
-- Veröffentlichungsstatus
-- Schedules
-- Schedule-/Runbook-Verknüpfungen
-- Managed Identity Status
-
-Runbook-Quellcode wird in Version 1 standardmäßig **nicht** exportiert, um unbeabsichtigte Aufnahme von sensitiven Inhalten zu vermeiden.
+Runbook-Quellcode wird standardmäßig nicht exportiert.
 
 ## 10.10 Key Vault
 
-Zu erfassen:
+Zu erfassen sind ausschließlich Konfigurationsmetadaten wie Vault Name, Resource ID, Region, RBAC-/Access-Policy-Modell, Public Network Access, Private Endpoints, Soft Delete und Purge Protection.
 
-- Vault Name
-- Resource ID
-- Region
-- RBAC-/Access-Policy-Modell
-- Public Network Access
-- Private Endpoints
-- Soft Delete Status
-- Purge Protection Status
-
-Nicht zu erfassen:
-
-- Secret Values
-- Key Material
-- Certificate Private Keys
-
-Optional können reine Objekt-Metadaten wie Anzahl oder Namen später ergänzt werden, sofern dies explizit freigegeben wird.
+Nicht zu erfassen sind Secret Values, Key Material oder Certificate Private Keys.
 
 ---
 
 # 11. Exportformat
 
-Ein Lauf erzeugt einen eigenen Exportordner.
+Ein Lauf erzeugt einen eigenen tenantbezogenen Exportordner mit Manifest, Summary, Log und modularen JSON-Dateien.
 
-Beispiel:
+Zielstruktur:
 
 ```text
-AzureDocumentation_Contoso_2026-08-10_083100/
+AzureDocumentation_<Tenant>_<Timestamp>/
 |
 +-- manifest.json
 +-- summary.json
 +-- collector.log
-|
 +-- 00-Tenant/
-|   +-- Tenants.json
-|   +-- Subscriptions.json
-|   +-- ResourceGroups.json
-|
 +-- 01-Inventory/
-|   +-- Resources.json
-|   +-- ResourceTypes.json
-|   +-- Tags.json
-|
 +-- 02-Network/
-|   +-- VNets.json
-|   +-- Subnets.json
-|   +-- Peerings.json
-|   +-- NICs.json
-|   +-- NSGs.json
-|   +-- NSGRules.json
-|   +-- RouteTables.json
-|   +-- Routes.json
-|   +-- PublicIPs.json
-|   +-- PrivateEndpoints.json
-|   +-- Gateways.json
-|   +-- PrivateDNS.json
-|
 +-- 03-Compute/
-|   +-- VirtualMachines.json
-|   +-- Disks.json
-|   +-- Availability.json
-|
 +-- 04-AVD/
-|   +-- Workspaces.json
-|   +-- HostPools.json
-|   +-- ApplicationGroups.json
-|   +-- SessionHosts.json
-|   +-- ScalingPlans.json
-|
 +-- 05-Storage/
-|   +-- StorageAccounts.json
-|
 +-- 06-Security/
-|   +-- RoleAssignments.json
-|   +-- Policies.json
-|   +-- Locks.json
-|   +-- KeyVaults.json
-|
 +-- 07-Backup/
-|   +-- Vaults.json
-|   +-- Policies.json
-|   +-- ProtectedItems.json
-|
 +-- 08-Monitoring/
-|   +-- LogAnalytics.json
-|   +-- DiagnosticSettings.json
-|   +-- Alerts.json
-|   +-- ActionGroups.json
-|
 +-- 09-Automation/
-|   +-- AutomationAccounts.json
-|   +-- Runbooks.json
-|   +-- Schedules.json
-|
 +-- 10-Relations/
-    +-- Relationships.json
 ```
 
-Optional soll der Ordner nach erfolgreichem Lauf zu einer ZIP-Datei gepackt werden können.
+Optional kann nach erfolgreichem Lauf ein ZIP erzeugt werden.
 
 ---
 
 # 12. Manifest
 
-Jeder Export enthält eine `manifest.json`.
+Jeder Export enthält eine `manifest.json` mit technischer Provenienz.
 
-Beispiel:
+Mindestens enthalten:
+
+- Schema-Version,
+- Collector-Version,
+- Start-/Endzeit,
+- Tenant,
+- Subscriptions,
+- Scope,
+- Modulstatus,
+- Ressourcenanzahl,
+- Fehler/Warnungen,
+- Read-only-Verifikationsstatus.
+
+Zielerweiterung:
 
 ```json
 {
-  "schemaVersion": "1.0",
-  "collectorVersion": "0.1.0",
-  "generatedAt": "2026-08-10T08:31:00+02:00",
   "mode": "ReadOnly",
-  "tenant": {
-    "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-    "displayName": "Contoso GmbH"
-  },
-  "subscriptions": [
-    {
-      "id": "11111111-2222-3333-4444-555555555555",
-      "name": "Production"
-    }
-  ],
-  "scope": {
-    "type": "Subscriptions",
-    "resourceGroups": []
-  },
-  "modules": {
-    "core": "Success",
-    "compute": "Success",
-    "network": "Success",
-    "avd": "Success",
-    "backup": "Partial"
-  },
-  "resourceCount": 143,
-  "errors": 2,
-  "warnings": 4
+  "readOnlyVerification": {
+    "status": "READ-ONLY VERIFIED",
+    "azureResourceMutations": 0,
+    "azureDataMutations": 0
+  }
 }
 ```
-
-Das Manifest dient als technische Provenienz des Exports.
 
 ---
 
 # 13. Summary
 
-Zusätzlich zu den Rohdaten soll `summary.json` eine kompakte Zusammenfassung enthalten.
-
-Beispielsweise:
-
-- Anzahl Subscriptions
-- Anzahl Resource Groups
-- Anzahl Ressourcen
-- Anzahl VMs
-- Anzahl VNets
-- Anzahl Subnets
-- Anzahl Public IPs
-- Anzahl Private Endpoints
-- Anzahl Storage Accounts
-- Anzahl AVD Host Pools
-- Anzahl Session Hosts
-- Anzahl Vaults
-- Anzahl Role Assignments
-- Anzahl Policies
-- Anzahl Automation Accounts
-- fehlgeschlagene Module
-- Warnungen
-
-Diese Datei soll eine schnelle KI- und Menschenauswertung ermöglichen, ohne zunächst alle Detaildateien laden zu müssen.
+`summary.json` enthält kompakte Mengen- und Statusinformationen, z. B. Anzahl Subscriptions, Resource Groups, Ressourcen, VMs, VNets, Subnets, Public IPs, Private Endpoints, Storage Accounts, AVD-Objekte, Vaults, Role Assignments, Policies, Automation Accounts sowie fehlgeschlagene Module und Warnungen.
 
 ---
 
 # 14. Beziehungen zwischen Ressourcen
 
-Ein zentrales Ziel ist nicht nur eine Ressourcenliste, sondern ein Modell der Infrastrukturbeziehungen.
+Ein zentrales Ziel ist ein Relationship-Modell statt nur einer Ressourcenliste.
 
 Beispiele:
 
 ```text
-Virtual Machine
-   -> Network Interface
-      -> Subnet
-         -> Virtual Network
-
-Network Interface
-   -> Network Security Group
-
-Subnet
-   -> Route Table
-
-Subnet
-   -> NSG
-
-Private Endpoint
-   -> Target Resource
-   -> Subnet
-
-AVD Session Host
-   -> Azure VM
-   -> NIC
-   -> Subnet
-
-VM
-   -> Managed Disk
-
-Diagnostic Setting
-   -> Resource
-   -> Log Analytics Workspace
+VM -> NIC -> Subnet -> VNet
+NIC -> NSG
+Subnet -> Route Table
+Subnet -> NSG
+Private Endpoint -> Target Resource
+AVD Session Host -> VM -> NIC -> Subnet
+VM -> Managed Disk
+Diagnostic Setting -> Log Analytics Workspace
 ```
 
-## 14.1 Relationship-Modell
-
-Geplant ist ein normalisiertes Modell:
+Normalisiertes Zielformat:
 
 ```json
 {
@@ -859,63 +691,32 @@ Geplant ist ein normalisiertes Modell:
 }
 ```
 
-Das Relationship-Modell soll später Grundlage für Architekturdiagramme und KI-Auswertungen sein.
-
 ---
 
 # 15. Logging
 
-Jeder Lauf erzeugt ein `collector.log`.
+Jeder Lauf erzeugt `collector.log` mit INFO, WARN, ERROR und optional DEBUG.
 
-Mindestens folgende Level sind vorzusehen:
+Logs enthalten Zeitstempel, Modul, Level, Aktion und Ergebnis. Secrets und Access Tokens dürfen nicht in Logs geschrieben werden.
 
-- INFO
-- WARN
-- ERROR
-- DEBUG optional
-
-Ein Logeintrag soll enthalten:
-
-- Zeitstempel
-- Modul
-- Level
-- Aktion
-- Ergebnis bzw. Fehler
-
-Secrets und Access Tokens dürfen nicht in Logs geschrieben werden.
+Die erfolgreiche Read-only-Verifikation muss protokolliert werden. Bei fehlgeschlagener Verifikation muss vor Azure-Inventarisierung abgebrochen werden.
 
 ---
 
 # 16. Fehlerbehandlung
 
-## 16.1 Modulfehler
+Ein Fehler in einem optionalen Collector-Modul soll nicht automatisch den gesamten Lauf abbrechen.
 
-Ein Fehler in einem optionalen Collector-Modul darf nicht automatisch den gesamten Lauf abbrechen.
+Kritische Fehler mit Abbruch sind insbesondere:
 
-Beispiel:
+- Read-only-Verifikation nicht erfolgreich,
+- keine Azure-Authentifizierung möglich,
+- Tenant nicht erreichbar,
+- keine gültige Subscription im Scope,
+- Exportziel nicht beschreibbar,
+- Core-Inventar nicht erstellbar.
 
-```text
-[OK] Core
-[OK] Compute
-[OK] Network
-[WARN] Backup - insufficient permissions
-[OK] AVD
-[OK] Monitoring
-```
-
-## 16.2 Kritische Fehler
-
-Der Lauf muss abbrechen, wenn beispielsweise:
-
-- keine Azure-Authentifizierung möglich ist,
-- der angegebene Tenant nicht erreichbar ist,
-- keine gültige Subscription im Scope vorhanden ist,
-- das Exportziel nicht beschrieben werden kann,
-- das Core-Inventar nicht erstellt werden kann.
-
-## 16.3 Exit Codes
-
-Geplant:
+Geplante Exit Codes:
 
 ```text
 0 = Erfolg
@@ -924,6 +725,7 @@ Geplant:
 3 = Authentifizierungs-/Berechtigungsfehler auf Core-Ebene
 4 = Export-/Dateisystemfehler
 5 = unerwarteter interner Fehler
+6 = Read-only-Verifikation fehlgeschlagen / nicht eindeutig
 ```
 
 ---
@@ -932,60 +734,21 @@ Geplant:
 
 `Config/collector.config.json` enthält ausschließlich nicht-sensitive Standardwerte.
 
-Beispiel:
-
-```json
-{
-  "output": {
-    "createZip": true,
-    "prettyJson": true
-  },
-  "collection": {
-    "includePowerState": true,
-    "includeIdentityDisplayNames": false,
-    "includeResourceChanges": false
-  },
-  "logging": {
-    "level": "Info"
-  }
-}
-```
-
-Reihenfolge der Konfiguration:
+Priorität:
 
 1. sichere interne Defaults,
 2. Konfigurationsdatei,
 3. explizite Kommandozeilenparameter.
 
-Kommandozeilenparameter haben die höchste Priorität.
+Die Read-only-Grundregel darf **nicht per Konfigurationsparameter deaktiviert oder überschrieben werden**.
 
 ---
 
 # 18. Modulkonzept
 
-Jedes Fachmodul soll möglichst eine definierte Schnittstelle besitzen.
+Fachmodule sollen eine definierte Schnittstelle besitzen und mindestens Name, Status, ItemsCollected, Warnings, Errors, Duration und OutputFiles melden.
 
-Konzeptionell:
-
-```powershell
-Invoke-CollectorModule \
-    -Context $CollectorContext \
-    -OutputPath $ModuleOutputPath
-```
-
-Ein Modul liefert mindestens:
-
-```text
-Name
-Status
-ItemsCollected
-Warnings
-Errors
-Duration
-OutputFiles
-```
-
-Dadurch kann Core den Lauf orchestrieren, ohne die Fachlogik der einzelnen Azure-Dienste kennen zu müssen.
+Jedes neue Fachmodul unterliegt vor Ausführungsfreigabe vollständig Kapitel 0.
 
 ---
 
@@ -993,118 +756,41 @@ Dadurch kann Core den Lauf orchestrieren, ohne die Fachlogik der einzelnen Azure
 
 ## 19.1 Resource ID als Primärreferenz
 
-Azure Resource IDs sind der bevorzugte technische Schlüssel für Beziehungen.
-
-Ressourcennamen allein dürfen nicht als eindeutige Referenz verwendet werden.
+Azure Resource IDs sind der bevorzugte technische Schlüssel. Ressourcennamen allein dürfen nicht als eindeutige Referenz verwendet werden.
 
 ## 19.2 Sortierung
 
-Arrays sollen nach stabilen Eigenschaften sortiert werden, z. B.:
-
-1. Subscription ID
-2. Resource Group
-3. Resource Type
-4. Resource Name
-
-Dies vereinfacht spätere Git-/Diff- und Snapshot-Vergleiche.
+Arrays sollen stabil nach Subscription ID, Resource Group, Resource Type und Resource Name sortiert werden.
 
 ## 19.3 Null-Werte
 
-Nicht verfügbare Daten dürfen nicht erfunden werden.
-
-Sie werden abhängig vom Schema:
-
-- als `null`,
-- als leere Liste,
-- oder als `NotAvailable`
-
-repräsentiert.
-
-Der Unterschied zwischen "nicht vorhanden" und "nicht abfragbar" soll, wo relevant, erkennbar bleiben.
+Nicht verfügbare Daten dürfen nicht erfunden werden. Der Unterschied zwischen "nicht vorhanden" und "nicht abfragbar" soll erkennbar bleiben.
 
 ---
 
 # 20. Sicherheit des Exports
 
-Die Exportdatei enthält interne Infrastrukturinformationen und ist daher als schützenswert zu betrachten.
+Exportdateien enthalten schützenswerte interne Infrastrukturinformationen wie interne IP-Adressen, Servernamen, Netzwerkbeziehungen, NSG-Regeln, Resource IDs und Rollenstrukturen.
 
-Dazu können gehören:
-
-- interne IP-Adressen,
-- Servernamen,
-- Netzwerkbeziehungen,
-- Firewall-/NSG-Regeln,
-- Azure Resource IDs,
-- Rollen und Berechtigungsstrukturen.
-
-Der Collector selbst implementiert in Version 1 noch keine eigene Verschlüsselung des Exportarchivs.
-
-Die Dokumentation muss deshalb klar darauf hinweisen, dass Exporte:
-
-- nicht unkontrolliert weitergegeben,
-- nicht in öffentliche Git-Repositories committed,
-- und nach Kundenvorgaben gespeichert werden sollen.
+Exporte dürfen nicht unkontrolliert weitergegeben oder in öffentliche Git-Repositories committed werden und müssen nach Kundenvorgaben gespeichert werden.
 
 ---
 
 # 21. KI-Grenze
 
-Der Collector selbst soll in Version 1 **keine KI benötigen**.
-
-Er erzeugt deterministische Infrastrukturinformationen.
-
-Die KI-Verarbeitung ist eine nachgelagerte Stufe:
+Der Collector benötigt in Version 1 keine KI. Er erzeugt deterministische Infrastrukturinformationen.
 
 ```text
-Collector
-   |
-   v
-JSON / ZIP
-   |
-   v
-AI Documentation Pipeline
-   |
-   +--> Beschreibung
-   +--> Architekturdiagramm
-   +--> Risiken / Auffälligkeiten
-   +--> DOCX
-   +--> PDF
+Collector -> JSON / ZIP -> AI Documentation Pipeline -> Beschreibung / Diagramm / DOCX / PDF
 ```
 
-Diese Trennung ist bewusst gewählt, um:
-
-- Datenerfassung reproduzierbar zu halten,
-- KI-Halluzinationen von der Datenerfassung zu trennen,
-- Exporte auch ohne KI nutzbar zu machen,
-- unterschiedliche KI-Systeme anschließen zu können.
+KI-Halluzinationen müssen von der Datenerfassung getrennt bleiben.
 
 ---
 
 # 22. Spätere KI-Dokumentation
 
-Eine spätere Ausbaustufe soll aus dem Export eine strukturierte technische Dokumentation erzeugen können.
-
-Zielgliederung beispielsweise:
-
-```text
-1. Dokumentzweck
-2. Tenant- und Subscription-Struktur
-3. Gesamtarchitektur
-4. Resource Groups
-5. Netzwerkarchitektur
-6. Compute / Server
-7. Azure Virtual Desktop
-8. Storage
-9. Backup und Recovery
-10. Monitoring und Logging
-11. Automation
-12. Rollen und Berechtigungen
-13. Governance / Policies
-14. Abhängigkeiten
-15. Sicherheitsbetrachtung
-16. Auffälligkeiten und Empfehlungen
-17. Ressourceninventar
-```
+Eine spätere Stufe soll aus dem Export strukturierte technische Dokumentationen erzeugen können, z. B. Tenant-/Subscription-Struktur, Gesamtarchitektur, Resource Groups, Network, Compute, AVD, Storage, Backup, Monitoring, Automation, RBAC, Governance, Abhängigkeiten, Sicherheitsbetrachtung und Ressourceninventar.
 
 KI-Ausgaben dürfen nicht als Fakt dargestellt werden, wenn die Quelldaten dies nicht belegen.
 
@@ -1112,71 +798,25 @@ KI-Ausgaben dürfen nicht als Fakt dargestellt werden, wenn die Quelldaten dies 
 
 # 23. Architekturdiagramme
 
-Das normalisierte Ressourcen- und Relationship-Modell soll später automatisch Diagramme ermöglichen.
-
-Primäres Zwischenformat kann beispielsweise Mermaid sein.
-
-Beispiel:
-
-```mermaid
-flowchart TD
-    VM[VM-APP] --> NIC[NIC-APP]
-    NIC --> SUBNET[Subnet Server]
-    SUBNET --> VNET[VNET-PROD]
-    NIC --> NSG[NSG-SERVER]
-    VM --> DISK[Managed Disk]
-```
-
-Später sind auch andere Renderer möglich.
-
-Der Collector selbst muss hierfür zunächst nur die notwendigen Beziehungen korrekt erfassen.
+Das normalisierte Ressourcen- und Relationship-Modell soll automatische Diagramme ermöglichen. Primäres Zwischenformat kann Mermaid sein; später sind auch Graphviz, draw.io-kompatible Daten, SVG oder PNG möglich.
 
 ---
 
 # 24. Versions- und Änderungsvergleich
 
-Ein späteres Ziel ist der Vergleich zweier Collector-Snapshots.
-
-Beispiel:
-
-```text
-Snapshot A: 2026-08-03
-Snapshot B: 2026-08-10
-
-Added:
-+ Private Endpoint pe-storage01
-
-Changed:
-~ VM-AVD01 VM Size: D4as_v5 -> E2as_v5
-~ Disk VM-AVD01_OS: 256 GiB -> 512 GiB
-
-Removed:
-- Public IP pip-old-app
-```
-
-Der stabile Exportaufbau ist bereits in Version 1 so zu gestalten, dass solche Vergleiche später möglich sind.
+Ein späteres Ziel ist der Vergleich zweier Collector-Snapshots mit Added/Changed/Removed-Ressourcen. Der Exportaufbau ist bereits früh so stabil zu gestalten, dass solche Vergleiche möglich sind.
 
 ---
 
 # 25. Azure Resource Changes
 
-Eine spätere oder optionale Collector-Funktion soll Azure Resource Graph Change History integrieren.
-
-Diese Funktion ist **ergänzend** zu Snapshot-Diffs und ersetzt diese nicht.
-
-Ziel:
-
-- Erkennen kurzfristiger Änderungen,
-- Zuordnung von Änderungszeitpunkten,
-- Unterstützung von Änderungsberichten.
-
-Da Change-History-Daten zeitlich begrenzt verfügbar sein können, ist der langfristige Snapshot-Vergleich die verlässlichere eigene Historie.
+Azure Resource Graph Change History kann später ergänzend integriert werden. Sie ersetzt nicht den langfristigen eigenen Snapshot-Vergleich.
 
 ---
 
 # 26. Nicht-Ziele der initialen Version
 
-Version 1 ist ausdrücklich **kein**:
+Version 1 ist ausdrücklich kein:
 
 - Azure Deployment Tool,
 - Configuration Management Tool,
@@ -1189,7 +829,7 @@ Version 1 ist ausdrücklich **kein**:
 - vollständiger Entra-ID-Exporter,
 - vollständiger Microsoft-365-Exporter.
 
-Der Fokus liegt auf **Azure-Infrastrukturinventarisierung für Dokumentation**.
+Der Fokus liegt auf Azure-Infrastrukturinventarisierung für Dokumentation.
 
 ---
 
@@ -1197,346 +837,158 @@ Der Fokus liegt auf **Azure-Infrastrukturinventarisierung für Dokumentation**.
 
 ## Phase 0 – Projektgrundlage
 
-### Ziel
-
-Saubere technische Basis schaffen.
-
-### Aufgaben
-
 - [x] Repository anlegen
 - [x] `Umsetzungsplan.md` als Source of Truth erstellen
-- [ ] Grundlegende Repository-Struktur erstellen
-- [ ] `README.md` erstellen
-- [ ] `.gitignore` erstellen
+- [x] grundlegende Repository-Struktur beginnen
+- [x] `README.md` erstellen
+- [x] `.gitignore` erstellen
 - [ ] Lizenzentscheidung treffen
-- [ ] PowerShell-Version definieren
-- [ ] Coding-Konventionen definieren
-- [ ] Basis-Konfigurationsschema anlegen
-
-### Ergebnis
-
-Repository ist für die eigentliche Implementierung vorbereitet.
-
----
+- [x] PowerShell-Mindestversion initial definieren
+- [ ] Coding-Konventionen vollständig definieren
+- [x] Basis-Konfigurationsschema anlegen
+- [x] oberste Read-only-Regel definieren
+- [ ] automatisches Read-only-Gate implementieren
 
 ## Phase 1 – Core Collector
 
-### Ziel
-
-Ein vollständiger Collector-Lauf kann initialisiert und beendet werden.
-
-### Aufgaben
-
-- [ ] `Collect-AzureDocumentation.ps1` erstellen
-- [ ] `Collector.Core.psm1` erstellen
-- [ ] Voraussetzungen prüfen
-- [ ] `Az.Accounts` prüfen
-- [ ] `Az.ResourceGraph` prüfen
-- [ ] Azure-Kontext erkennen
-- [ ] interaktive Anmeldung unterstützen
-- [ ] Tenant-Erkennung implementieren
-- [ ] Tenant-Auswahl implementieren
-- [ ] Subscription-Erkennung implementieren
-- [ ] Subscription-Auswahl implementieren
-- [ ] Resource-Group-Scope implementieren
-- [ ] Output-Verzeichnis erzeugen
-- [ ] Logging implementieren
-- [ ] Manifest-Grundstruktur erzeugen
-- [ ] Exit Codes implementieren
-
-### Abnahmekriterium
-
-Ein Benutzer kann den Collector starten, Tenant und Subscription auswählen und erhält einen technisch gültigen leeren Export mit Manifest und Log.
-
----
+- [x] `Collect-AzureDocumentation.ps1` erstellen
+- [x] `Collector.Core.psm1` erstellen
+- [x] Voraussetzungen prüfen
+- [x] `Az.Accounts` prüfen
+- [x] `Az.ResourceGraph` prüfen
+- [x] Azure-Kontext erkennen
+- [x] interaktive Anmeldung unterstützen
+- [x] Tenant-Erkennung / Auswahl implementieren
+- [x] Subscription-Erkennung / Auswahl implementieren
+- [x] Resource-Group-Scope implementieren
+- [x] Output-Verzeichnis erzeugen
+- [x] Logging implementieren
+- [x] Manifest-Grundstruktur erzeugen
+- [ ] Exit Codes vollständig implementieren
+- [ ] Read-only-Verifikationsstatus in Manifest/Log integrieren
 
 ## Phase 2 – Basisinventar über Azure Resource Graph
 
-### Ziel
-
-Generisches Ressourceninventar erstellen.
-
-### Aufgaben
-
-- [ ] Resource Groups erfassen
-- [ ] Ressourcen erfassen
-- [ ] Ressourcentypen erfassen
-- [ ] Tags erfassen
-- [ ] Regionen erfassen
-- [ ] Pagination vollständig unterstützen
-- [ ] Mehrere Subscriptions unterstützen
-- [ ] Resource-Group-Filter anwenden
-- [ ] Daten normalisieren
-- [ ] stabile Sortierung implementieren
-- [ ] `summary.json` erzeugen
-
-### Abnahmekriterium
-
-Alle Ressourcen im gewählten Scope sind mit eindeutiger Resource ID im Export vorhanden.
-
----
+- [x] Resource Groups erfassen
+- [x] Ressourcen erfassen
+- [x] Ressourcentypen über Summary ableiten
+- [x] Tags erfassen
+- [x] Regionen erfassen
+- [x] Pagination unterstützen
+- [x] mehrere Subscriptions unterstützen
+- [x] Resource-Group-Filter anwenden
+- [x] Daten normalisieren
+- [x] stabile Sortierung implementieren
+- [x] `summary.json` erzeugen
+- [ ] Integrationstest gegen reale Test-Subscription
 
 ## Phase 3 – Network Collector
 
-### Ziel
-
-Netzwerkstruktur ausreichend detailliert erfassen, um später ein Topologiediagramm generieren zu können.
-
-### Aufgaben
-
-- [ ] VNets
-- [ ] Subnets
-- [ ] Peerings
-- [ ] NICs
-- [ ] IP Configurations
-- [ ] Public IPs
-- [ ] NSGs
-- [ ] NSG Rules
-- [ ] Route Tables
-- [ ] Routes
+- [ ] VNets / Subnets / Peerings
+- [ ] NICs / IP Configurations / Public IPs
+- [ ] NSGs / Rules
+- [ ] Route Tables / Routes
 - [ ] NAT Gateways
 - [ ] Private Endpoints
-- [ ] Private DNS Zones
-- [ ] VNet DNS Links
-- [ ] VPN Gateways
-- [ ] Local Network Gateways
-- [ ] Load Balancer Basisdaten
-- [ ] Application Gateway Basisdaten
-- [ ] Azure Firewall Basisdaten
-- [ ] Netzwerk-Relationships erzeugen
-
-### Abnahmekriterium
-
-VM -> NIC -> Subnet -> VNet sowie NSG-/Routing-Beziehungen sind maschinenlesbar rekonstruierbar.
-
----
+- [ ] Private DNS
+- [ ] Gateways / Load Balancer / App Gateway / Firewall
+- [ ] Netzwerk-Relationships
 
 ## Phase 4 – Compute Collector
 
-### Aufgaben
-
 - [ ] Virtual Machines
-- [ ] VM Size
-- [ ] OS Type
-- [ ] Images
-- [ ] Availability Zone / Set
-- [ ] OS Disk
-- [ ] Data Disks
-- [ ] Disk SKU
-- [ ] Disk Size
+- [ ] VM Size / OS / Images
+- [ ] Availability
+- [ ] OS-/Data-Disks
 - [ ] NIC Relationships
 - [ ] optional Power State
 
-### Abnahmekriterium
-
-Jede VM kann ihren Netzwerk- und Storage-Ressourcen eindeutig zugeordnet werden.
-
----
-
 ## Phase 5 – AVD Collector
-
-### Aufgaben
 
 - [ ] Workspaces
 - [ ] Host Pools
 - [ ] Application Groups
-- [ ] Workspace Associations
 - [ ] Session Hosts
-- [ ] Host Pool Settings
-- [ ] Start VM on Connect
+- [ ] Settings / Start VM on Connect
 - [ ] Scaling Plans
-- [ ] Scaling Plan Associations
 - [ ] Session Host -> VM Relationship
-
-### Abnahmekriterium
-
-Die logische AVD-Struktur und die Zuordnung zu Azure-VMs ist rekonstruierbar.
-
----
 
 ## Phase 6 – Storage, Backup und Key Vault
 
-### Aufgaben
-
-- [ ] Storage Accounts
-- [ ] Storage Security Settings
-- [ ] Storage Network Settings
-- [ ] Recovery Services Vaults
-- [ ] Backup Vaults
-- [ ] Backup Policies
-- [ ] Protected Items
+- [ ] Storage Accounts / Security / Network
+- [ ] Recovery Services / Backup Vaults
+- [ ] Backup Policies / Protected Items
 - [ ] Key Vault Metadaten
 - [ ] Secret Filtering verifizieren
 
-### Abnahmekriterium
-
-Backup- und Storage-Architektur ist dokumentierbar, ohne sensitive Werte zu exportieren.
-
----
-
 ## Phase 7 – Security und Governance
-
-### Aufgaben
 
 - [ ] RBAC Role Assignments
 - [ ] Role Definitions Referenzen
 - [ ] Resource Locks
-- [ ] Policy Assignments
-- [ ] Initiative Assignments
-- [ ] Principal-Datenschutzkonzept umsetzen
-- [ ] optionale Display-Name-Auflösung implementieren
-
-### Abnahmekriterium
-
-Berechtigungen und Governance-Strukturen können nach Scope ausgewertet werden.
-
----
+- [ ] Policy / Initiative Assignments
+- [ ] Principal-Datenschutzkonzept
 
 ## Phase 8 – Monitoring und Automation
 
-### Aufgaben
-
-- [ ] Log Analytics Workspaces
+- [ ] Log Analytics
 - [ ] Diagnostic Settings
-- [ ] Action Groups
-- [ ] Metric Alerts
-- [ ] Activity Log Alerts
+- [ ] Action Groups / Alerts
 - [ ] Automation Accounts
-- [ ] Runbook Metadaten
-- [ ] Schedules
-- [ ] Job Schedule Associations
-
-### Abnahmekriterium
-
-Monitoring- und Automation-Abhängigkeiten sind nachvollziehbar dokumentierbar.
-
----
+- [ ] Runbook-Metadaten
+- [ ] Schedules / Associations
 
 ## Phase 9 – Relationship Engine
 
-### Ziel
-
-Alle wesentlichen Ressourcenbeziehungen in einem einheitlichen Modell zusammenführen.
-
-### Aufgaben
-
-- [ ] Relationship-Schema definieren
+- [ ] Relationship-Schema
 - [ ] Resource IDs normalisieren
-- [ ] Compute -> Network
-- [ ] Compute -> Disk
+- [ ] Compute -> Network / Disk
 - [ ] Network -> Network
 - [ ] AVD -> Compute
 - [ ] Private Endpoint -> Resource
-- [ ] Diagnostic Setting -> Destination
+- [ ] Diagnostic Settings -> Destination
 - [ ] Backup -> Protected Resource
 - [ ] Automation Associations
-- [ ] verwaiste Referenzen erkennen
 
-### Abnahmekriterium
+## Phase 10 – Qualitätssicherung und Härtung
 
-`Relationships.json` reicht aus, um eine erste automatisierte Azure-Architekturübersicht zu generieren.
-
----
-
-## Phase 10 – Qualitätssicherung
-
-### Aufgaben
-
-- [ ] Pester Unit Tests
+- [ ] automatisches Fail-Closed Read-only-Gate
+- [ ] Read-only-Tests für jeden Azure-Aufruf
+- [ ] Pester Unit Tests ausbauen
 - [ ] Integration Tests gegen Test-Subscription
-- [ ] Test mit leerer Subscription
-- [ ] Test mit mehreren Subscriptions
-- [ ] Test mit eingeschränkten Reader-Rechten
-- [ ] Test mit fehlenden Modulberechtigungen
-- [ ] Test mit AVD-Umgebung
-- [ ] Test mit Netzwerk ohne VMs
-- [ ] Test mit Private Endpoints
+- [ ] leere / mehrere Subscriptions testen
+- [ ] eingeschränkte Reader-Rechte testen
+- [ ] fehlende Modulberechtigungen testen
+- [ ] AVD / Private Endpoints / Sonderfälle testen
 - [ ] Secret Leakage Tests
 - [ ] JSON Schema Validation
 - [ ] PowerShell ScriptAnalyzer
 
-### Abnahmekriterium
-
-Collector erzeugt auch bei heterogenen Kundenumgebungen reproduzierbare und valide Ergebnisse.
-
----
-
 ## Phase 11 – Release 1.0
-
-### Aufgaben
 
 - [ ] README vervollständigen
 - [ ] Permissions-Dokumentation
 - [ ] Beispielaufrufe
-- [ ] Beispiel-Export mit synthetischen Daten
+- [ ] synthetischer Beispiel-Export
 - [ ] Troubleshooting
-- [ ] CHANGELOG
-- [ ] Versionierung
+- [ ] CHANGELOG / Versionierung
 - [ ] Release ZIP
+- [ ] finale vollständige Read-only-Verifikation
 
-### Ziel
-
-Kundengenerisch einsetzbarer Read-only Azure Infrastructure Collector.
+Ziel: kundengenerisch einsetzbarer und verifiziert ausschließlich lesender Azure Infrastructure Collector.
 
 ---
 
 # 28. Spätere Ausbaustufen
 
-Nach einer stabilen Collector-Version können unabhängig davon folgende Komponenten entstehen.
+Mögliche Komponenten nach stabiler Collector-Version:
 
-## 28.1 Documentation Generator
-
-```text
-Collector Export
-      |
-      v
-Documentation Generator
-      |
-      +--> Markdown
-      +--> DOCX
-      +--> PDF
-```
-
-## 28.2 AI Analyzer
-
-Mögliche Aufgaben:
-
-- Ressourcenbeziehungen beschreiben,
-- Auffälligkeiten erkennen,
-- technische Dokumentation formulieren,
-- Risiken und fehlende Konfigurationen markieren,
-- Empfehlungen erzeugen.
-
-## 28.3 Diagram Generator
-
-Mögliche Formate:
-
-- Mermaid
-- Graphviz
-- draw.io-kompatible Daten
-- SVG/PNG
-
-## 28.4 Snapshot Diff
-
-Vergleich beliebiger Collector-Exporte.
-
-## 28.5 Scheduled Collection
-
-Später mögliche Plattformen:
-
-- Windows Scheduled Task
-- Azure Automation
-- Azure Function
-- GitHub Actions, sofern sicherer Azure-Zugriff konfiguriert ist
-
-## 28.6 Historisierung
-
-Optional:
-
-- Storage Account
-- Blob Storage
-- Git Repository für bereinigte, nicht-sensitive Exporte
-- Datenbank
+- Documentation Generator für Markdown/DOCX/PDF,
+- AI Analyzer,
+- Diagram Generator,
+- Snapshot Diff,
+- Scheduled Collection,
+- Historisierung.
 
 Die Speicherung von Kundenexporten in Git muss bewusst entschieden werden und ist nicht Standard.
 
@@ -1546,22 +998,7 @@ Die Speicherung von Kundenexporten in Git muss bewusst entschieden werden und is
 
 ## 29.1 Keine kundenspezifischen Sonderfälle im Core
 
-Wenn ein Kunde eine Besonderheit benötigt, soll diese nach Möglichkeit generisch modelliert werden.
-
-Nicht erwünscht:
-
-```powershell
-if ($TenantName -eq "Kunde Müller") {
-    # Speziallogik
-}
-```
-
-Erwünscht:
-
-- generische Feature-Erkennung,
-- Konfiguration,
-- modulare Provider,
-- objektbasierte Logik.
+Kundenbesonderheiten sollen generisch über Feature-Erkennung, Konfiguration, Provider oder objektbasierte Logik modelliert werden.
 
 ## 29.2 Keine stillen Annahmen
 
@@ -1569,25 +1006,17 @@ Kann ein Wert nicht sicher bestimmt werden, wird er nicht geraten.
 
 ## 29.3 Keine Secrets in Source Control
 
-Das Repository darf enthalten:
-
-- Beispiel-IDs mit Platzhaltern,
-- synthetische Testdaten,
-- öffentliche Schema-/Konfigurationsbeispiele.
-
-Es darf nicht enthalten:
-
-- echte Secrets,
-- Tokens,
-- Kennwörter,
-- private Keys,
-- produktive Credential-Dateien.
+Erlaubt sind Platzhalter und synthetische Testdaten; echte Secrets, Tokens, Kennwörter, Private Keys und produktive Credential-Dateien sind verboten.
 
 ## 29.4 Rückwärtskompatibilität des Exports
 
-Ab Version `1.0.0` sollen Änderungen am JSON-Schema bewusst versioniert werden.
+Ab Version `1.0.0` werden Breaking Changes am JSON-Schema über eine neue Major Schema Version kenntlich gemacht.
 
-Breaking Changes erfordern eine neue Major Schema Version.
+## 29.5 Neue Azure-Aufrufe benötigen Read-only-Nachweis
+
+Jeder neu hinzugefügte Azure-Cmdlet-, REST-, SDK- oder API-Aufruf muss vor Merge/Freigabe fachlich darauf geprüft werden, ob er ausschließlich lesende Wirkung besitzt.
+
+Ein neuer Azure-Aufruf ohne eindeutigen Read-only-Nachweis gilt als nicht freigegeben.
 
 ---
 
@@ -1596,9 +1025,10 @@ Breaking Changes erfordern eine neue Major Schema Version.
 Ein Collector-Modul gilt erst als fertig, wenn:
 
 - [ ] es kundengenerisch funktioniert,
-- [ ] es mehrere Subscriptions unterstützt,
+- [ ] mehrere Subscriptions unterstützt werden,
 - [ ] Scope-Filter respektiert werden,
 - [ ] es ausschließlich read-only arbeitet,
+- [ ] **alle Azure-Aufrufe als read-only verifiziert sind**,
 - [ ] Fehler sauber behandelt werden,
 - [ ] fehlende Berechtigungen nicht verschleiert werden,
 - [ ] keine Secrets exportiert werden,
@@ -1606,36 +1036,39 @@ Ein Collector-Modul gilt erst als fertig, wenn:
 - [ ] JSON valide ist,
 - [ ] Unit Tests für Kernlogik existieren,
 - [ ] das Modul im Manifest seinen Status meldet,
-- [ ] die Dokumentation aktualisiert ist.
+- [ ] die Dokumentation aktualisiert ist,
+- [ ] die abschließende Read-only-Verifikation erfolgreich ist.
 
 ---
 
 # 31. Definition of Done für Version 1.0
 
-Version 1.0 gilt als erreicht, wenn:
+Version 1.0 gilt erst als erreicht, wenn:
 
 1. der Collector auf einem neuen administrativen Arbeitsplatz ohne projektspezifische Anpassung ausführbar ist,
-2. eine interaktive Anmeldung und Tenant-Auswahl möglich ist,
+2. interaktive Anmeldung und Tenant-Auswahl möglich sind,
 3. mehrere Subscriptions unterstützt werden,
 4. Resource Groups optional eingegrenzt werden können,
 5. Core-, Compute-, Network-, AVD-, Storage-, Backup-, Security-, Monitoring- und Automation-Daten erfasst werden,
-6. alle Exportdaten maschinenlesbar und strukturiert vorliegen,
-7. ein Manifest und eine Summary erzeugt werden,
+6. Exportdaten maschinenlesbar und strukturiert vorliegen,
+7. Manifest und Summary erzeugt werden,
 8. Ressourcenbeziehungen modelliert werden,
 9. Secret Filtering getestet ist,
 10. eingeschränkte Berechtigungen kontrolliert behandelt werden,
-11. der Collector keine Azure-Konfiguration verändert,
-12. ein vollständiger Export einer realistischen Azure-Kundenumgebung erfolgreich durchgeführt wurde,
-13. der Export als Grundlage für eine technische KI-Dokumentation verwendet werden kann.
+11. der Collector keine Azure-Konfiguration oder Azure-Daten verändert,
+12. ein realistischer Kundenexport erfolgreich durchgeführt wurde,
+13. der Export für KI-Dokumentation verwendbar ist,
+14. **die vollständige finale Read-only-Verifikation den Status `READ-ONLY VERIFIED` liefert.**
+
+Ohne Punkt 14 darf Version 1.0 nicht als ausführbarer Release freigegeben werden.
 
 ---
 
 # 32. Aktuelle Priorität
 
-Die nächste Entwicklung erfolgt in dieser Reihenfolge:
-
 ```text
 P0  Projektgrundlage
+P0a Read-only Verification Gate
 P1  Core / Auth / Tenant / Subscription / Scope
 P2  Basisinventar über Resource Graph
 P3  Netzwerk
@@ -1649,24 +1082,24 @@ P10 Tests / Härtung
 P11 Release 1.0
 ```
 
+**P0a hat sicherheitstechnisch Vorrang vor allen weiteren ausführbaren Entwicklungsständen.**
+
 Die KI-Dokumentgenerierung beginnt erst, sobald das Collector-Datenmodell ausreichend stabil ist.
 
 ---
 
 # 33. Offene Architekturentscheidungen
 
-Folgende Punkte sind bewusst noch nicht endgültig festgelegt und werden vor Implementierung der jeweiligen Funktion entschieden:
-
-- Mindestversion PowerShell 7.x
-- exakte Az-Modul-Versionen
-- Modulabhängigkeiten vs. dynamische Installation
-- ZIP standardmäßig aktiv oder optional
-- Umgang mit Identity Display Names / Microsoft Graph
-- Detailtiefe bei Defender for Cloud
-- Aufnahme von Resource Change History in Version 1 oder später
-- exaktes JSON-Schema für Relationships
-- Release-/SemVer-Strategie vor Version 1.0
-- Lizenz des Repositories
+- exakte Az-Modul-Versionen,
+- Modulabhängigkeiten vs. dynamische Installation,
+- ZIP standardmäßig aktiv oder optional,
+- Identity Display Names / Microsoft Graph,
+- Detailtiefe Defender for Cloud,
+- Resource Change History in Version 1 oder später,
+- Relationship-JSON-Schema,
+- Release-/SemVer-Strategie,
+- Lizenz des Repositories,
+- konkrete technische Umsetzung des statischen/dynamischen Read-only-Gates.
 
 Entscheidungen werden in diesem Dokument nachgeführt.
 
@@ -1674,9 +1107,7 @@ Entscheidungen werden in diesem Dokument nachgeführt.
 
 # 34. Leitentscheidung
 
-Der **AzureInfrastructureCollector** soll kein einmaliges Skript für eine konkrete Azure-Umgebung werden, sondern ein **wiederverwendbares, tenantfähiges und kundengenerisches Read-only Inventarisierungswerkzeug**, das als verlässliche Datengrundlage für automatisierte Azure-Dokumentation dient.
-
-Die Reihenfolge der Verantwortlichkeiten lautet:
+Der **AzureInfrastructureCollector** soll kein einmaliges Skript für eine konkrete Azure-Umgebung werden, sondern ein wiederverwendbares, tenantfähiges und kundengenerisches **Read-only Inventarisierungswerkzeug**, das als verlässliche Datengrundlage für automatisierte Azure-Dokumentation dient.
 
 ```text
 Azure ist die Quelle der Wahrheit
@@ -1690,4 +1121,6 @@ KI interpretiert und formuliert
 Dokumente und Diagramme präsentieren das Ergebnis
 ```
 
-Die KI darf die Infrastruktur beschreiben und analysieren – **der Collector liefert die Fakten**.
+Die KI darf die Infrastruktur beschreiben und analysieren – der Collector liefert die Fakten.
+
+**Über allem steht jedoch die Sicherheitsregel: Ohne unmittelbar zuvor erfolgreich abgeschlossene Read-only-Verifikation darf kein ausführbarer Collector-Stand zur Ausführung freigegeben werden.**
