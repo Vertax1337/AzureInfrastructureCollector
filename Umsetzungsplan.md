@@ -145,6 +145,7 @@ Collect-AzureDocumentation.ps1
    +--> Tenant / Subscription Scope
    +--> Azure Resource Graph / geprüfte Read-only Cmdlets
    +--> Core-Normalisierung
+   +--> P3a Network-Normalisierung / Relationships
    +--> Collector.ExportSecurity
    |      +--> sensitive Property-Namen redigieren
    |      +--> sensitive Wertmuster redigieren
@@ -157,7 +158,9 @@ Normalisiertes und gehärtetes JSON-Modell
    +--> readOnlyVerification.json
    +--> manifest.json
    +--> summary.json
-   +--> Inventardaten
+   +--> Inventory/resourceGroups.json
+   +--> Inventory/resources.json
+   +--> Inventory/network.json
    +--> Logs
 ```
 
@@ -326,6 +329,8 @@ Keine Kennwörter, Client Secrets, Storage Keys, SAS Tokens, Private Keys, Acces
 
 Neben sensitiven Feld-/Tag-Namen wird der finale Export zusätzlich anhand starker Wertmuster geprüft. Die zentrale Exporthärtung gilt auch für später hinzukommende Fachmodule.
 
+Für P3 gilt zusätzlich: `Microsoft.Network/connections.properties.sharedKey` darf weder abgefragt noch normalisiert oder exportiert werden.
+
 ## 5.6 Reproduzierbarkeit
 
 Stabile Felder, konsistente Dateinamen, definierte Sortierung, ISO-8601-Zeitstempel, Resource IDs und Schema-/Collector-Versionen. Resource-Group-Referenzen in Ressourcen werden subscriptionbezogen gegen `resourceGroups.json` kanonisiert.
@@ -362,6 +367,9 @@ AzureInfrastructureCollector/
 |   +-- Collector.Automation.psm1
 |
 +-- Queries/
+|   +-- Resources.kql
+|   +-- ResourceGroups.kql
+|   +-- Network.kql
 +-- Config/
 +-- Schemas/
 +-- Tests/
@@ -369,6 +377,7 @@ AzureInfrastructureCollector/
 |   +-- Test-ReadOnlyCompliance.ps1
 |   +-- Invoke-PreAzureValidation.ps1
 +-- Docs/
+|   +-- P3-Network.md
 ```
 
 ---
@@ -425,7 +434,27 @@ Tenant
 Tenant, Subscriptions, Resource Groups, Regionen, Ressourcentypen, Tags, Resource IDs.
 
 ## Network
-VNets, Subnets, Peerings, NICs, IP-Konfiguration, Public IPs, NSGs/Rules, Routes, NAT, Private Endpoints, Private DNS, Gateways, Load Balancer, Application Gateway, Firewall-Basisdaten.
+
+### P3a – Network Topology Foundation
+
+- VNets und Address Spaces,
+- Subnets einschließlich NSG-/Route-Table-/NAT-Referenz, Service Endpoints und Delegations-Metadaten,
+- VNet Peerings und Peering-Zustand/-Optionen,
+- NICs und IP-Konfigurationen,
+- Public IPs,
+- NSGs und benutzerdefinierte Security Rules,
+- Route Tables und Routes,
+- Virtual Network Gateways,
+- Local Network Gateways,
+- Connections ohne `sharedKey`,
+- Network Watcher,
+- explizite Resource-ID-basierte Relationships.
+
+### P3b – Erweiterte Netzwerkdienste
+
+Nach erfolgreicher P3a-Validierung: Private Endpoints, Private DNS/VNet Links, NAT Gateways als eigene Ressourcen, Load Balancer, Application Gateway, Azure Firewall/Firewall-Policy-Referenzen und weitere sicher explizit projizierbare Netzwerkbeziehungen.
+
+Vollständige rohe `properties`-Blöcke werden auch in P3 nicht als Abkürzung exportiert.
 
 ## Compute
 VMs, Size/SKU, OS/Image, Availability, NIC-Zuordnung, OS-/Data-Disks, Disk SKU/Size, optional Power State als Momentaufnahme.
@@ -452,16 +481,23 @@ Log Analytics, Diagnostic Settings, Action Groups, Alerts, Automation Accounts, 
 +-- manifest.json
 +-- summary.json
 +-- Inventory/
+|   +-- resourceGroups.json
+|   +-- resources.json
+|   +-- network.json
 +-- Logs/
 ```
 
 Resource ID ist der bevorzugte technische Primärschlüssel. Arrays werden stabil sortiert. Nicht verfügbare Werte werden nicht erfunden. `Output/` bleibt von Git ausgeschlossen.
 
+`Inventory/network.json` enthält in P3a die Sammlungen `virtualNetworks`, `subnets`, `peerings`, `networkInterfaces`, `ipConfigurations`, `networkSecurityGroups`, `securityRules`, `publicIpAddresses`, `routeTables`, `routes`, `virtualNetworkGateways`, `localNetworkGateways`, `connections`, `networkWatchers` und `relationships` sowie eine eigene Summary.
+
 Export-Minimierung:
 
 - lokale Repository-/Arbeitsplatzpfade werden nicht in `readOnlyVerification.json` ausgegeben,
 - das ausführende Azure-Konto/UPN wird nicht in `manifest.json` ausgegeben,
-- Tenant-, Subscription- und Resource IDs bleiben als technische Korrelationsschlüssel erhalten.
+- Tenant-, Subscription- und Resource IDs bleiben als technische Korrelationsschlüssel erhalten,
+- Network-Abfragen projizieren nur explizit freigegebene Felder,
+- Connection Shared Keys werden nicht abgefragt.
 
 ---
 
@@ -470,15 +506,30 @@ Export-Minimierung:
 Zielbeziehungen unter anderem:
 
 ```text
-VM -> NIC -> Subnet -> VNet
+VNet -> ContainsSubnet -> Subnet
+VNet -> PeeredWith -> VNet
+Subnet -> SecuredBy -> NSG
+Subnet -> UsesRouteTable -> Route Table
+Subnet -> UsesNatGateway -> NAT Gateway
+NIC -> AttachedToVm -> VM
+NIC -> SecuredBy -> NSG
+NIC -> HasIpConfiguration -> IP Configuration
+IP Configuration -> AttachedToSubnet -> Subnet
+IP Configuration -> UsesPublicIp -> Public IP
+NSG -> ContainsSecurityRule -> Security Rule
+Route Table -> ContainsRoute -> Route
+Virtual Network Gateway -> AttachedToSubnet -> Subnet
+Virtual Network Gateway -> UsesPublicIp -> Public IP
+Connection -> UsesVirtualNetworkGateway -> Virtual Network Gateway
+Connection -> UsesLocalNetworkGateway -> Local Network Gateway
 VM -> Managed Disk
-NIC/Subnet -> NSG
-Subnet -> Route Table
 Private Endpoint -> Target Resource
 AVD Session Host -> VM
 Diagnostic Setting -> Destination
 Backup -> Protected Resource
 ```
+
+P3a verwendet bereits ein Network-spezifisches Relationship-Array. P9 vereinheitlicht später die Relationship-Schemata aller Fachmodule.
 
 ---
 
@@ -486,7 +537,7 @@ Backup -> Protected Resource
 
 Logs enthalten Zeitstempel, Level, Modul/Aktion und Ergebnis; niemals Secrets oder Access Tokens.
 
-Der normale Collector zeigt zusätzlich sichtbare Phasenmeldungen und Objektzähler, damit längere ARG-/Exportvorgänge nicht wie ein stiller Hänger wirken.
+Der normale Collector zeigt zusätzlich sichtbare Phasenmeldungen und Objektzähler, damit längere ARG-/Exportvorgänge nicht wie ein stiller Hänger wirken. Mit P3a umfasst der normale Collector fünf sichtbare Phasen.
 
 Kritische Fehler:
 
@@ -497,6 +548,8 @@ Kritische Fehler:
 - Azure-Authentifizierung nicht möglich,
 - Tenant/Subscription nicht erreichbar,
 - Core-Export nicht möglich.
+
+Ein isolierter P3a-Netzwerkfehler darf bei erfolgreichem Core-Inventar zu `PartialSuccess` führen, nicht zu einem stillen Verlust des Core-Exports.
 
 Exit-Code-Kategorien:
 
@@ -524,7 +577,7 @@ Der Collector benötigt keine KI.
 Azure -> Collector -> JSON -> AI Documentation Pipeline -> Markdown/DOCX/PDF/Diagramme
 ```
 
-Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
+Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere sollen Netzwerkbeziehungen soweit technisch möglich explizit als Resource-ID-Relationships vorliegen und nicht aus Namenskonventionen erraten werden.
 
 ---
 
@@ -607,14 +660,33 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [x] zentrale wertbasierte Secret-Redaction ergänzen
 - [x] starke Muster für SAS/signierte URLs, Account Keys/Connection Strings, Private Keys, JWTs und eingebettete Credentials konfigurieren
 - [x] normale HTTPS-Werte explizit als Nicht-Secret testen
-- [x] dedizierte Unit-Tests für Export-Härtung ergänzen; erwarteter Gesamtumfang ab diesem Stand: 26 Tests
-- [ ] gehärteten Stand lokal durch automatische Pre-Azure-Validierung bestätigen (`READ-ONLY VERIFIED`, 26/26, `READY FOR AZURE TEST`)
-- [ ] zweiten Real-Run erzeugen und dessen Export erneut strukturell/auf Secret-Leakage prüfen
-
-> **P3 beginnt erst nach erfolgreichem Abschluss der beiden offenen P2a-Validierungspunkte.**
+- [x] dedizierte Unit-Tests für Export-Härtung einschließlich Array-Typstabilität ergänzen
+- [x] gehärteter Export in wiederholten Real-Runs bestätigt: 12 Resource Groups, 134 Ressourcen, 0 Fehler, stabile IDs/Counts
+- [x] RG-Casing, Metadaten-Minimierung, Secret-Leakage und `[]`-Array-Typstabilität im dritten Real-Export bestätigt
 
 ## P3 – Netzwerk
-- [ ] Netzwerkobjekte und Relationships
+
+### P3a – Network Topology Foundation
+- [x] Architektur und Sicherheitsgrenze dokumentiert (`Docs/P3-Network.md`)
+- [x] `Queries/Network.kql` mit expliziter Safe-Projection
+- [x] `Collector.Network.psm1` für Normalisierung und Relationships
+- [x] `Inventory/network.json` in normalen Collector integriert
+- [x] Network-Summary in `summary.json` integriert
+- [x] `sharedKey` aus Query und Schema explizit ausgeschlossen
+- [x] sechs dedizierte P3a-Unit-Tests ergänzt
+- [x] statische Read-only-Gegenprüfung: keine neuen Azure-/REST-/CLI-/SDK-Schreibpfade
+- [ ] aktuelle automatische Pre-Azure-Validierung erfolgreich (`READ-ONLY VERIFIED`, 0 Testfehler, `READY FOR AZURE TEST`)
+- [ ] erster P3a-Real-Export erzeugt und `network.json` fachlich/strukturell geprüft
+
+### P3b – Erweiterte Netzwerkdienste
+- [ ] Private Endpoints / Private DNS / VNet Links
+- [ ] NAT Gateways als eigene Ressourcen
+- [ ] Load Balancer
+- [ ] Application Gateway
+- [ ] Azure Firewall / Firewall Policy Referenzen
+- [ ] zusätzliche Relationships und Real-Export-Validierung
+
+> **P3b beginnt erst nach erfolgreicher P3a-Pre-Azure-Validierung und geprüftem P3a-Real-Export.**
 
 ## P4 – Compute
 - [ ] VM-/Disk-/Availability-Daten und Relationships
@@ -669,6 +741,8 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 14. Architektur-/Scope-Änderungen werden zuerst in diesem Dokument festgelegt.
 15. Jeder Fachmodul-Export muss vor dem Schreiben durch die zentrale Export-Härtung laufen.
 16. P3/P4 dürfen keine parallelen Sonderwege für Secret-Filtering oder RG-Normalisierung einführen.
+17. Network Connections dürfen `sharedKey` weder abfragen noch exportieren.
+18. Netzwerkbeziehungen werden soweit möglich über Resource IDs und nicht über Namensheuristiken modelliert.
 
 ---
 
@@ -709,7 +783,8 @@ P0c  Pre-Azure Validation
 P1   Core / Auth / Tenant / Subscription / Scope
 P2   Basisinventar
 P2a  Export-Härtung vor P3
-P3   Netzwerk
+P3a  Network Topology Foundation
+P3b  Erweiterte Netzwerkdienste
 P4   Compute
 P5   AVD
 P6   Storage / Backup / Key Vault
@@ -720,7 +795,7 @@ P10  Tests / Härtung
 P11  Release 1.0
 ```
 
-**Aktueller nächster Schritt:** Den gehärteten Stand über den normalen Ein-Befehl-Start lokal ausführen. Die automatisch eingebettete Pre-Azure-Validierung muss erneut `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` liefern; mit den sieben neuen Export-Härtungstests werden 26 erfolgreiche Tests erwartet. Anschließend wird der zweite Real-Export auf kanonische RG-Namen, entfernte lokale/operatorbezogene Metadaten, interne Konsistenz und Secret-Leakage geprüft. Erst danach beginnt P3.
+**Aktueller nächster Schritt:** Den neuen P3a-Stand über den normalen Ein-Befehl-Start ausführen. Die automatisch eingebettete Pre-Azure-Validierung muss erneut `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` liefern. Mit den sechs neuen Network-Tests werden auf Basis des zuletzt bestätigten Standes 33 erfolgreiche Tests erwartet. Erst danach darf der reale P3a-Azure-Lauf fortgesetzt werden. Anschließend wird `Inventory/network.json` auf Counts, Relationships, RG-Kanonisierung, Schema-Stabilität und Secret-Leakage geprüft.
 
 ---
 
@@ -731,7 +806,7 @@ P11  Release 1.0
 - Identity Display Names / Microsoft Graph,
 - Defender-for-Cloud-Detailtiefe,
 - Resource Change History,
-- Relationship-Schema,
+- vereinheitlichtes Relationship-Schema für P9,
 - SemVer-Strategie,
 - Repository-Lizenz.
 
@@ -746,7 +821,7 @@ Azure ist die Quelle der Wahrheit
         ->
 Collector erfasst ausschließlich lesend den Ist-Zustand
         ->
-JSON normalisiert und härtet die Fakten
+JSON normalisiert, verknüpft und härtet die Fakten
         ->
 KI interpretiert und formuliert
         ->
