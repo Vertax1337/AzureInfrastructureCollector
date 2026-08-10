@@ -4,19 +4,55 @@ Read-only PowerShell collector for repeatable, customer-neutral Azure infrastruc
 
 > Current milestone: **Core MVP 0.1.0**
 
-> **Supreme safety rule:** No collector build is approved for execution unless the final verification result is `READ-ONLY VERIFIED`.
+> **Supreme safety rule:** No collector build is approved for a real Azure run unless the final verification result is `READ-ONLY VERIFIED` and the mandatory pre-Azure validation completes with `READY FOR AZURE TEST`.
 
 The authoritative project scope, architecture and safety rules are defined in [`Umsetzungsplan.md`](./Umsetzungsplan.md).
 
-## Recommended entry point
+## Before the first real Azure test
 
-Use the bootstrap script from **PowerShell 7 (`pwsh.exe`)**, not Windows PowerShell 5.1 (`powershell.exe`):
+Use the dedicated Azure-free validation workflow from **PowerShell 7 (`pwsh.exe`)**:
+
+```powershell
+./Tools/Invoke-PreAzureValidation.ps1
+```
+
+Or explicitly from Command Prompt / Windows PowerShell:
+
+```powershell
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Invoke-PreAzureValidation.ps1
+```
+
+The workflow performs, in this order:
+
+1. PowerShell 7.2+ runtime check,
+2. initial fail-closed read-only source-code verification,
+3. Pester 5.5.0+ detection,
+4. automatic Pester installation from `PSGallery` with `-Scope CurrentUser` if missing,
+5. complete Pester test suite under `./Tests`,
+6. final fail-closed read-only source-code verification,
+7. explicit final status.
+
+A real Azure test is permitted only when the command ends with:
+
+```text
+PRE-AZURE VALIDATION RESULT
+Status: READY FOR AZURE TEST
+...
+Azure access performed: NO
+Administrator elevation: NOT USED
+```
+
+The pre-Azure validation itself does **not** authenticate to Azure and does **not** run the collector.
+
+## Recommended collector entry point
+
+After a successful pre-Azure validation, use:
 
 ```powershell
 ./Start-AzureInfrastructureCollector.ps1
 ```
 
-If you are starting from Command Prompt or Windows PowerShell, invoke PowerShell 7 explicitly:
+If starting from Command Prompt or Windows PowerShell, invoke PowerShell 7 explicitly:
 
 ```powershell
 pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-AzureInfrastructureCollector.ps1
@@ -34,9 +70,9 @@ The bootstrap performs only local prerequisite handling before starting the coll
 
 ## Administrator rights and elevation
 
-**Local Windows administrator rights are not required for the normal collector workflow.**
+**Local Windows administrator rights are not required for the normal collector or pre-Azure validation workflow.**
 
-Missing Az modules are installed only with:
+Missing runtime Az modules and the optional validation dependency Pester are installed only in the current user's PowerShell module path:
 
 ```powershell
 Install-Module <Module> -Repository PSGallery -Scope CurrentUser
@@ -48,39 +84,32 @@ The project deliberately does **not**:
 - call `Start-Process -Verb RunAs`,
 - restart itself elevated,
 - request a UAC administrator token,
-- automatically install or upgrade PowerShell 7.
+- automatically install or upgrade PowerShell 7,
+- automatically register or modify `PSGallery`.
 
-If PowerShell 7.2+ is missing, the bootstrap stops with an explanatory error. PowerShell installation remains a separate, deliberate workstation/admin task.
+If PowerShell 7.2+ is missing, the script stops with an explanatory error. PowerShell installation remains a separate, deliberate workstation/admin task.
 
-If `PSGallery` is not registered, the bootstrap also stops instead of changing repository configuration automatically.
+If `PSGallery` is not registered, dependency handling also stops instead of changing repository configuration automatically.
 
 Azure RBAC permissions are separate from local Windows administrator rights. The Azure identity still needs sufficient read permissions for the selected tenant/subscriptions.
 
-## Mandatory read-only verification
+## Standalone read-only verification
 
-The standalone verification must also run under **PowerShell 7**.
-
-From an existing PowerShell 7 session:
+For a source-code-only safety check without running Pester:
 
 ```powershell
 ./Tools/Test-ReadOnlyCompliance.ps1
 ```
 
-Or explicitly from Command Prompt / Windows PowerShell:
+Or explicitly:
 
 ```powershell
 pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Test-ReadOnlyCompliance.ps1
 ```
 
-Do **not** use:
+Do **not** use `powershell.exe`; Windows PowerShell 5.1 is outside the supported runtime.
 
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File .\Tools\Test-ReadOnlyCompliance.ps1
-```
-
-`powershell.exe` is Windows PowerShell 5.1 and is outside the supported runtime. The checker now detects this before loading the PowerShell-7-only guard and exits without making any Azure request.
-
-The only successful approval state is:
+The only successful read-only state is:
 
 ```text
 READ-ONLY VERIFICATION
@@ -100,6 +129,8 @@ The gate is fail-closed:
 - Azure CLI execution is blocked.
 - dynamic command execution is blocked.
 - `Start-Process` is blocked, preventing self-elevation paths.
+- `Install-Module` is allowed only with literal `-Scope CurrentUser`.
+- PowerShell repository mutation and alternative package mutation paths are blocked.
 - PowerShell parse errors block approval.
 - suspicious direct Azure HTTP/SDK usage blocks approval.
 
@@ -112,9 +143,11 @@ Currently approved Azure commands:
 - `Set-AzContext -Scope Process`
 - `Search-AzGraph`
 
-Local dependency installation in `CurrentUser` scope does not modify Azure and is part of the approved bootstrap boundary.
+Local dependency installation in `CurrentUser` scope does not modify Azure and is part of the approved local bootstrap/validation boundary.
 
 ## Requirements
+
+Runtime:
 
 - PowerShell 7.2 or newer
 - network access to PowerShell Gallery when a required module is missing
@@ -122,13 +155,7 @@ Local dependency installation in `CurrentUser` scope does not modify Azure and i
 - `Az.ResourceGraph`
 - Azure identity with read access to the target scope
 
-Normally you do **not** need to install the two Az modules manually; the bootstrap handles missing modules for the current user.
-
-Pester is required only for development/tests:
-
-```powershell
-Install-Module Pester -Scope CurrentUser
-```
+Pre-Azure validation additionally requires Pester 5.5.0 or newer. `Invoke-PreAzureValidation.ps1` installs it automatically for `CurrentUser` when it is missing.
 
 ## Usage
 
@@ -213,16 +240,16 @@ The Core MVP exports only explicitly selected inventory fields. Full resource `p
 
 ## Tests
 
-Run all Pester tests **from PowerShell 7**:
+For the mandatory pre-Azure test, use the combined workflow:
+
+```powershell
+./Tools/Invoke-PreAzureValidation.ps1
+```
+
+For development, Pester can still be invoked directly:
 
 ```powershell
 Invoke-Pester ./Tests
-```
-
-Or explicitly:
-
-```powershell
-pwsh.exe -NoProfile -Command "Invoke-Pester ./Tests"
 ```
 
 The suite covers:
@@ -238,6 +265,10 @@ The suite covers:
 
 Implemented:
 
+- dedicated Azure-free `Invoke-PreAzureValidation.ps1`
+- automatic `CurrentUser` installation of Pester for mandatory validation
+- double read-only verification around the Pester suite
+- explicit `READY FOR AZURE TEST` gate status
 - preferred non-elevating bootstrap entry point
 - automatic `CurrentUser` installation of missing `Az.Accounts` / `Az.ResourceGraph`
 - no automatic PowerShell installation
