@@ -7,6 +7,21 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$minimumPowerShellVersion = [version]'7.2.0'
+
+# This standalone safety check uses the same supported runtime as the collector.
+# Keep this preflight compatible with Windows PowerShell 5.1 so an accidental
+# powershell.exe invocation fails cleanly before the PowerShell-7 guard is loaded.
+if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion -lt $minimumPowerShellVersion) {
+    Write-Error (
+        "PowerShell {0} or newer (pwsh.exe / PSEdition Core) is required for the read-only verification. Current runtime: {1} {2}. No Azure request was made. Re-run with: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Test-ReadOnlyCompliance.ps1" -f `
+            $minimumPowerShellVersion,
+            $PSVersionTable.PSEdition,
+            $PSVersionTable.PSVersion
+    )
+    exit 7
+}
+
 $guardModulePath = Join-Path $RepositoryRoot 'Modules/Collector.ReadOnlyGuard.psm1'
 Import-Module $guardModulePath -Force -ErrorAction Stop
 
