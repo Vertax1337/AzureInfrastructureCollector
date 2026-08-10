@@ -61,7 +61,15 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - three additional export-shape regression tests covering string-array preservation, nested enumerable flattening and hardened network address fields
 - Local Network Gateway FQDN collection via `properties.fqdn`, normalized independently as `localNetworkGateways[].fqdn`
 - two dedicated Local Network Gateway FQDN tests covering safe query projection and independent IP/FQDN normalization
-- `Docs/P3-Network.md` defining the P3a/P3b architecture and safety boundary
+- P3b Resource Graph coverage for Private Endpoints, Private DNS Zones/VNet Links, NAT Gateways, Load Balancers, Application Gateways, Azure Firewalls and Firewall Policies
+- P3b normalized Private Link connection model with subnet/target Resource-ID relationships while excluding request messages and connection-state descriptions
+- P3b Private DNS Zone/VNet-link model with registration/resolution metadata and explicit VNet relationships
+- P3b NAT Gateway model with Public IP/Public IP Prefix references
+- P3b Load Balancer topology for frontend IP configurations, backend pools/backend addresses, rules, probes and outbound rules
+- P3b Application Gateway topology for subnet/frontend/port/backend/listener/routing/probe/path-map structures without certificate material
+- P3b Azure Firewall/Firewall Policy topology for SKU, threat-intelligence mode, policy/virtual-hub/subnet/Public-IP references without Firewall rule bodies
+- eight dedicated P3b Pester tests covering query safety, Private Link, Private DNS, NAT, Load Balancer, Application Gateway, Azure Firewall/Policy and empty-collection stability
+- `Docs/P3-Network.md` defining the P3a/P3b architecture, safety boundary, relationships and validation gates
 
 ### Fixed
 
