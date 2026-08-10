@@ -23,7 +23,7 @@ P3a collects only explicitly selected, documentation-relevant fields for:
 - Route Tables
 - Routes
 - Virtual Network Gateways
-- Local Network Gateways
+- Local Network Gateways, including separate IP-address and FQDN endpoint fields
 - VPN/ER/VNet Connections
 - Network Watchers
 
@@ -82,6 +82,8 @@ The document contains:
 
 `summary.json` receives the P3 network summary as a nested `network` object.
 
+For `localNetworkGateways`, `gatewayIpAddress` and `fqdn` are distinct fields. The collector preserves whichever Azure configuration is present and does not synthesize one endpoint type from the other.
+
 ## Safety and data-minimization rules
 
 P3 continues to use only the existing, already allowlisted `Search-AzGraph` path through `Invoke-CollectorResourceGraph`.
@@ -132,9 +134,9 @@ The real export also exposed an export-shape regression: string arrays were part
 
 The same regression affected the presentation of `approvedAzureCommandsFound` in `readOnlyVerification.json`; the safety result itself remained `READ-ONLY VERIFIED`, but the exported command-name strings were not represented correctly. The scalar-preservation fix covers this field as well.
 
-The Local Network Gateway in the first real export had an empty `gatewayIpAddress`. P3a should additionally consider the supported `fqdn` endpoint property so an FQDN-configured on-premises gateway is not documented as endpoint-less.
+The Local Network Gateway in the first real export had an empty `gatewayIpAddress`. P3a now explicitly projects `properties.fqdn` as `localGatewayFqdn` and normalizes it into a separate `fqdn` field. This allows an FQDN-configured on-premises gateway to be documented without overloading or fabricating `gatewayIpAddress`.
 
-Because executable export-hardening code changed after this real run, this run does **not** close P3a. The next normal collector start must first pass the complete automatic Pre-Azure validation again and then produce a new real export with stable string-array values.
+Because executable export-hardening and Network-normalization code changed after this real run, this run does **not** close P3a. The next normal collector start must first pass the complete automatic Pre-Azure validation again and then produce a new real export with stable scalar/array values and correct Local Network Gateway endpoint information.
 
 ## P3b – Extended network services
 
