@@ -67,6 +67,28 @@ Describe 'Collector read-only guard' {
         @($result.violations).Count | Should -Be 0
     }
 
+    It 'blocks Install-Module outside CurrentUser scope' {
+        $testRoot = Join-Path $TestDrive 'AllUsersDependency'
+        New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $testRoot 'bad.ps1') -Encoding UTF8 -Value "Install-Module Az.Accounts -Repository PSGallery -Scope AllUsers -Force"
+
+        $result = Test-CollectorReadOnlyCompliance -RepositoryRoot $testRoot
+
+        $result.verified | Should -BeFalse
+        @($result.violations.code) | Should -Contain 'DEPENDENCY_SCOPE'
+    }
+
+    It 'blocks PowerShell repository mutation' {
+        $testRoot = Join-Path $TestDrive 'RepositoryMutation'
+        New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $testRoot 'bad.ps1') -Encoding UTF8 -Value "Register-PSRepository -Name Custom -SourceLocation 'https://example.invalid'"
+
+        $result = Test-CollectorReadOnlyCompliance -RepositoryRoot $testRoot
+
+        $result.verified | Should -BeFalse
+        @($result.violations.code) | Should -Contain 'BLOCKED_LOCAL_MUTATION'
+    }
+
     It 'requires Set-AzContext to use process scope' {
         $testRoot = Join-Path $TestDrive 'ContextScope'
         New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
