@@ -1,0 +1,23 @@
+{
+  "collector": {
+    "name": "AzureInfrastructureCollector",
+    "version": "0.1.0",
+    "schemaVersion": "1.0"
+  },
+  "requirements": {
+    "minimumPowerShellVersion": "7.2.0",
+    "requiredModules": [
+      "Az.Accounts",
+      "Az.ResourceGraph"
+    ]
+  },
+  "resourceGraph": {
+    "pageSize": 1000
+  },
+  "export": {
+    "jsonDepth": 20
+  },
+  "security": {
+    "sensitivePropertyPattern": "(?i)(secret|password|passwd|token|credential|connectionstring|connection_string|sastoken|accesskey|accountkey|privatekey|clientsecret|apikey)"
+  }
+}
