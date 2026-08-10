@@ -121,7 +121,7 @@ P3b adds normalized collections for:
 
 ### P3b data-minimization boundary
 
-P3b deliberately does **not** collect or normalize:
+P3b deliberately does **not normalize or export**:
 
 - VPN connection `sharedKey`,
 - Private Endpoint `requestMessage`,
@@ -131,6 +131,8 @@ P3b deliberately does **not** collect or normalize:
 - Azure Firewall application/network/NAT rule collections,
 - Firewall Policy transport-security certificate/secret configuration,
 - complete raw Azure `properties` blocks.
+
+Some parent resources are returned by Azure Resource Graph with nested child structures needed for deterministic topology extraction. Only the explicitly normalized fields listed in this document are allowed to reach `network.json`; transient source properties that are not part of the normalized model are discarded before export.
 
 Application Gateway certificate **material** is outside the P3 scope. The collector documents routing/topology, not certificate contents.
 
