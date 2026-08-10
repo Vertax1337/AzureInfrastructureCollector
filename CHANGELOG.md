@@ -51,6 +51,7 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 
 ### Fixed
 
+- normal collector runs no longer pause after Resource Group discovery for an optional `Read-Host` filter prompt; without `-ResourceGroup`, all discovered Resource Groups are collected automatically, while explicit `-ResourceGroup` filtering remains available
 - Azure authentication temporarily forces plain-text rendering (`$PSStyle.OutputRendering = PlainText` plus `NO_COLOR`) so device-code/login text is copyable without raw ANSI escape sequences; previous rendering settings are restored afterwards
 - normal bootstrap import suppresses PowerShell's unapproved-verb discoverability warning without changing module behavior
 - preferred bootstrap login falls back from failed WAM/browser authentication to `Connect-AzAccount -UseDeviceAuthentication`, while keeping the Az context process-scoped and preserving the non-interactive no-prompt behavior
