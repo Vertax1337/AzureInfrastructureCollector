@@ -15,7 +15,7 @@
 
 Der **AzureInfrastructureCollector darf unter keinen Umständen Azure-Ressourcen, Azure-Konfigurationen, Azure-Datenbestände oder andere Azure-seitige Zustände verändern.**
 
-Ein Skriptstand, Modul, Hotfix, Testskript oder ausführbarer Code darf erst dann zur Ausführung freigegeben werden, wenn unmittelbar zuvor die abschließende Read-only-Verifikation erfolgreich war und eindeutig den Status `READ-ONLY VERIFIED` liefert.
+Ein Skriptstand, Modul, Hotfix, Testskript oder ausführbarer Code darf erst dann für einen realen Azure-Lauf freigegeben werden, wenn die abschließende Read-only-Verifikation erfolgreich war und eindeutig `READ-ONLY VERIFIED` liefert.
 
 Kann Read-only nicht zweifelsfrei bestätigt werden, gilt der Stand als **nicht freigegeben**.
 
@@ -48,9 +48,9 @@ Nicht zulässig sind insbesondere:
 
 ## 0.3 Keine reine Verb-Prüfung
 
-Read-only wird anhand der **tatsächlichen Wirkung** beurteilt, nicht nur anhand des Cmdlet-Verbs. `Set-AzContext -Scope Process` ist beispielsweise zulässig, obwohl das Verb `Set` lautet, weil dabei keine Azure-Ressource verändert wird.
+Read-only wird anhand der **tatsächlichen Wirkung** beurteilt. `Set-AzContext -Scope Process` ist zulässig, obwohl das Verb `Set` lautet, weil keine Azure-Ressource verändert wird.
 
-## 0.4 Fail-Closed-Prinzip
+## 0.4 Fail Closed
 
 - eindeutig lesend verifiziert -> zulässig,
 - eindeutig lokal ohne Azure-Ressourcenänderung -> zulässig,
@@ -59,9 +59,9 @@ Read-only wird anhand der **tatsächlichen Wirkung** beurteilt, nicht nur anhand
 - potenziell schreibend -> blockieren,
 - schreibend -> blockieren.
 
-## 0.5 Pflichtprüfung vor jeder Freigabe
+## 0.5 Pflichtprüfung
 
-Vor jeder Ausführungsfreigabe werden mindestens geprüft:
+Vor jeder realen Azure-Ausführungsfreigabe werden mindestens geprüft:
 
 1. alle PowerShell-Dateien des ausführbaren Scopes,
 2. alle Azure PowerShell Cmdlets,
@@ -84,17 +84,17 @@ Data-plane write operations: NONE
 Local writes: approved local bootstrap/export operations only
 ```
 
-## 0.7 Automatisches Read-only-Gate
+## 0.7 Automatisches Gate
 
-Der Collector besitzt ein automatisches Fail-Closed-Gate. Ein unbekannter Azure-Aufruf oder eine blockierte Ausführungsmethode verhindert den Start der Azure-Inventarisierung.
+Das Projekt besitzt ein Fail-Closed-Gate. Unbekannte Azure-Aufrufe, direkte REST-/CLI-Pfade, dynamische Befehlsausführung und nicht genehmigte lokale Mutationspfade blockieren die Freigabe.
 
-Automatische Prüfungen ersetzen nicht die fachliche Prüfung eines neu eingeführten Azure-Aufrufs.
+Automatische Prüfungen ersetzen nicht die fachliche Prüfung eines neuen Azure-Aufrufs.
 
 ## 0.8 Änderungen an dieser Regel
 
-Eine Aufweichung dieser Regel ist nur nach expliziter Entscheidung des Projektverantwortlichen und vorheriger Änderung dieser Source of Truth zulässig.
+Eine Aufweichung ist nur nach expliziter Entscheidung des Projektverantwortlichen und vorheriger Änderung dieser Source of Truth zulässig.
 
-> **Keine bestätigte Read-only-Verifikation = keine Ausführungsfreigabe.**
+> **Keine bestätigte Read-only-Verifikation = keine Azure-Ausführungsfreigabe.**
 
 ---
 
@@ -102,7 +102,7 @@ Eine Aufweichung dieser Regel ist nur nach expliziter Entscheidung des Projektve
 
 Der AzureInfrastructureCollector ist ein **kundengenerisches, tenantfähiges, reproduzierbares und ausschließlich lesendes Inventarisierungswerkzeug** für Azure-Infrastrukturen.
 
-Er erzeugt ein normalisiertes, maschinenlesbares Datenmodell als Grundlage für:
+Er erzeugt ein normalisiertes Datenmodell als Grundlage für:
 
 - technische Bestandsdokumentation,
 - Architekturdiagramme,
@@ -111,11 +111,11 @@ Er erzeugt ein normalisiertes, maschinenlesbares Datenmodell als Grundlage für:
 - Sicherheits- und Betriebsdokumentation,
 - spätere DOCX-/PDF-Ausgabe.
 
-Die Datenerfassung und die spätere KI-/Dokumentgenerierung bleiben getrennte Komponenten.
+Datenerfassung und spätere KI-/Dokumentgenerierung bleiben getrennt.
 
 ---
 
-# 2. Grundarchitektur
+# 2. Ausführungsarchitektur
 
 ```text
 Benutzer
@@ -123,119 +123,133 @@ Benutzer
    v
 Start-AzureInfrastructureCollector.ps1
    |
-   +--> Read-only Gate (lokaler Source-Code-Check)
-   +--> PowerShell-Version prüfen
-   +--> benötigte PowerShell-Module prüfen
-   +--> fehlende Az-Module ausschließlich CurrentUser installieren
+   +--> minimaler lokaler PowerShell-Runtime-Preflight
+   |      +--> PS 7.2+ vorhanden? sonst kontrollierter Abbruch
+   |
+   +--> Read-only Gate über den lokalen ausführbaren Source-Code
+   |
+   +--> Dependency Bootstrap
+   |      +--> Az.Accounts prüfen
+   |      +--> Az.ResourceGraph prüfen
+   |      +--> fehlende Module nur CurrentUser installieren
    |
    v
 Collect-AzureDocumentation.ps1
    |
    +--> Read-only Gate erneut
-   +--> Azure Auth / lokaler Kontext
-   +--> Azure Resource Graph / verifizierte Read-only Cmdlets
+   +--> Azure Auth / lokaler Az-Kontext
+   +--> Azure Resource Graph / geprüfte Read-only Cmdlets
    |
    v
 Normalisiertes JSON-Modell
    |
+   +--> readOnlyVerification.json
    +--> manifest.json
    +--> summary.json
-   +--> readOnlyVerification.json
-   +--> modulare Inventardaten
+   +--> Inventardaten
    +--> Logs
 ```
 
-## 2.1 Trennung Bootstrap / Collector
+Der minimale Runtime-Preflight vor dem Gate greift **nicht auf Azure zu und verändert lokal nichts**. Er existiert ausschließlich, damit Windows PowerShell 5.1 kontrolliert abgewiesen werden kann, bevor PowerShell-7-spezifischer Guard-Code geladen wird.
 
-### Bootstrap
+---
 
-`Start-AzureInfrastructureCollector.ps1` ist der bevorzugte Benutzer-Einstiegspunkt.
+# 3. Bootstrap / lokale Voraussetzungen
 
-Er darf ausschließlich lokale Voraussetzungen verwalten:
+## 3.1 Bevorzugter Einstiegspunkt
 
-- PowerShell-Version prüfen,
-- benötigte PowerShell-Module prüfen,
-- fehlende Module im Scope `CurrentUser` installieren,
-- keine Azure-Ressourcen verändern,
-- keine UAC-Elevation auslösen,
-- anschließend den eigentlichen Collector aufrufen.
+```powershell
+./Start-AzureInfrastructureCollector.ps1
+```
 
-### Collector
+## 3.2 Kein Self-Elevation
 
-`Collect-AzureDocumentation.ps1` enthält die Azure-Inventarisierungsorchestrierung. Der Collector selbst installiert keine Dependencies und führt keine Self-Elevation durch.
+Das Projekt darf keine automatische UAC-Elevation durchführen.
 
-## 2.2 Kein Self-Elevation
-
-Das Projekt darf **keine automatische UAC-Elevation** durchführen.
-
-Insbesondere nicht zulässig:
+Verboten sind insbesondere:
 
 - `Start-Process ... -Verb RunAs`,
-- Neustart des Skripts als Administrator,
+- Neustart als Administrator,
 - automatisches Nachladen eines administrativen Tokens.
 
-Der normale Collector-Betrieb soll ohne lokale Administratorrechte möglich sein.
+Der normale Collector-Lauf soll ohne lokale Administratorrechte möglich sein.
 
-## 2.3 PowerShell 7
+## 3.3 PowerShell 7
 
-Mindestversion initial: **PowerShell 7.2**.
+Mindestversion: **PowerShell 7.2**.
 
-PowerShell 7 selbst wird **nicht automatisch installiert oder aktualisiert**. Ist die Mindestversion nicht vorhanden, bricht der Bootstrap mit einer verständlichen Meldung ab. Eine eventuell notwendige Installation von PowerShell 7 bleibt ein bewusster separater Arbeitsplatz-/Adminvorgang.
+PowerShell selbst wird nicht automatisch installiert oder aktualisiert. Fehlt die Mindestversion, bricht der Bootstrap kontrolliert ab. Eine PowerShell-Installation bleibt ein separater bewusster Arbeitsplatz-/Adminvorgang.
 
-## 2.4 Dependency-Policy
+## 3.4 Dependency Policy
 
-Initial benötigte Module:
+Initial benötigt:
 
 - `Az.Accounts`,
 - `Az.ResourceGraph`.
 
-Verhalten des Bootstrap:
+Bootstrap-Verhalten:
 
-1. Vorhandensein prüfen.
-2. Vorhandene geeignete Installation weiterverwenden.
-3. Fehlende Module ausschließlich über PowerShell Gallery mit `Install-Module -Scope CurrentUser` installieren.
-4. Keine `AllUsers`-Installation.
-5. Keine UAC-Elevation.
-6. Nach Installation erneut prüfen und importieren.
-7. Bei Fehler kontrolliert abbrechen.
+1. vorhandene Module erkennen,
+2. vorhandene Installation weiterverwenden,
+3. fehlende Module nur über bereits registrierte `PSGallery` beziehen,
+4. Installation ausschließlich `Install-Module -Scope CurrentUser`,
+5. niemals `AllUsers`,
+6. niemals Self-Elevation,
+7. keine automatische Repository-Registrierung oder -Änderung,
+8. Module nach Installation erneut erkennen und importieren,
+9. bei Fehler kontrolliert abbrechen.
 
-Pester ist eine Entwicklungs-/Testabhängigkeit und wird nicht für einen normalen Collector-Lauf benötigt.
+Pester ist nur Entwicklungs-/Testabhängigkeit und nicht Voraussetzung für einen normalen Collector-Lauf.
+
+## 3.5 Vom Gate erzwungene lokale Grenze
+
+Zulässig ist im ausführbaren Projektcode ausschließlich die explizite `Install-Module -Scope CurrentUser`-Dependency-Installation.
+
+Das Gate blockiert unter anderem:
+
+- `Install-Module` ohne literal `-Scope CurrentUser`,
+- `Update-Module`,
+- `Uninstall-Module`,
+- `Save-Module`,
+- PowerShell-Repository-Registrierung/-Änderung,
+- alternative Package-/PSResource-Mutationspfade,
+- `Start-Process`.
 
 ---
 
-# 3. Kernprinzipien
+# 4. Collector-Kernprinzipien
 
-## 3.1 Kundengenerisch
+## 4.1 Kundengenerisch
 
 Keine fest codierten Kunden-, Tenant-, Subscription-, Resource-Group- oder Ressourcennamen im Core.
 
-## 3.2 Tenantfähig
+## 4.2 Tenantfähig
 
-Ein Lauf besitzt genau einen Tenant-Kontext und kann darin eine oder mehrere Subscriptions erfassen. Ein späterer Batch-Modus kann mehrere Tenants nacheinander verarbeiten; Ergebnisse verschiedener Tenants bleiben getrennt.
+Ein Lauf besitzt genau einen Tenant-Kontext und kann mehrere Subscriptions erfassen. Mehrere Tenants werden später nacheinander verarbeitet und nie ununterscheidbar in einem Export vermischt.
 
-## 3.3 Resource Graph First
+## 4.3 Resource Graph First
 
-Azure Resource Graph ist die bevorzugte Quelle für breite Inventarisierung. Az PowerShell oder später geprüfte REST-Aufrufe werden nur eingesetzt, wenn Resource Graph erforderliche Details nicht liefert.
+Azure Resource Graph ist die bevorzugte Quelle für breite Inventarisierung. Az PowerShell oder später geprüfte REST-Aufrufe werden nur verwendet, wenn Resource Graph erforderliche Details nicht liefert.
 
-## 3.4 Least Privilege
+## 4.4 Least Privilege
 
-Lokale Administratorrechte sind für den normalen Collector-Lauf nicht vorgesehen. Azure-seitig soll Reader-orientierter Zugriff genügen, soweit ein Fachbereich keine zusätzlichen Leserechte benötigt.
+Lokale Administratorrechte sind nicht vorgesehen. Azure-seitig soll Reader-orientierter Zugriff genügen, soweit einzelne Fachbereiche keine zusätzlichen Leserechte erfordern.
 
-## 3.5 Keine Secrets
+## 4.5 Keine Secrets
 
 Keine Kennwörter, Client Secrets, Storage Keys, SAS Tokens, Private Keys, Access Tokens, API Keys oder sonstigen Credential-Werte werden bewusst exportiert.
 
-## 3.6 Reproduzierbarkeit
+## 4.6 Reproduzierbarkeit
 
 Stabile Felder, konsistente Dateinamen, definierte Sortierung, ISO-8601-Zeitstempel, Resource IDs und Schema-/Collector-Versionen.
 
-## 3.7 Best Effort
+## 4.7 Best Effort
 
-Optionale Modulfehler sollen möglichst als Partial Collection behandelt werden. Read-only-Verifikationsfehler sind immer kritisch und blockieren den Lauf.
+Optionale Modulfehler können Partial Collection ergeben. Read-only-Verifikationsfehler sind immer kritisch.
 
 ---
 
-# 4. Repository-Struktur
+# 5. Repository-Struktur
 
 ```text
 AzureInfrastructureCollector/
@@ -269,30 +283,7 @@ AzureInfrastructureCollector/
 
 ---
 
-# 5. Bedienung
-
-## 5.1 Empfohlener Einstieg
-
-```powershell
-./Start-AzureInfrastructureCollector.ps1
-```
-
-Ablauf:
-
-1. lokales Read-only-Gate,
-2. PowerShell-Runtime prüfen,
-3. Dependencies prüfen/installieren,
-4. Collector starten,
-5. Collector prüft Read-only erneut,
-6. Azure Auth/Scope,
-7. Inventarisierung,
-8. Export.
-
-## 5.2 Direkter Collector-Aufruf
-
-`Collect-AzureDocumentation.ps1` bleibt für Entwicklung und vorbereitete Systeme direkt nutzbar. In diesem Fall müssen die Dependencies bereits vorhanden sein.
-
-## 5.3 Parameter
+# 6. Bedienung und Parameter
 
 Bootstrap und Collector unterstützen initial:
 
@@ -302,11 +293,13 @@ Bootstrap und Collector unterstützen initial:
 - `-OutputPath`,
 - `-NonInteractive`.
 
-Im `-NonInteractive`-Modus müssen Authentifizierung und Scope deterministisch vorliegen; es dürfen keine Eingabeprompts entstehen.
+Der direkte Aufruf von `Collect-AzureDocumentation.ps1` bleibt für Entwicklung und vorbereitete Systeme möglich; dort müssen Dependencies bereits vorhanden sein.
+
+Im `-NonInteractive`-Modus dürfen keine Eingabeprompts erforderlich sein.
 
 ---
 
-# 6. Authentifizierung und Azure-Kontext
+# 7. Authentifizierung und Azure-Kontext
 
 Version 1 unterstützt interaktive Anmeldung über `Connect-AzAccount` und vorhandene Az-Kontexte.
 
@@ -321,7 +314,7 @@ Credentials dürfen niemals im Repository hinterlegt werden.
 
 ---
 
-# 7. Scope-Modell
+# 8. Scope-Modell
 
 ```text
 Tenant
@@ -332,11 +325,9 @@ Tenant
        +-- Resource Group 3
 ```
 
-Ressourcen verschiedener Tenants dürfen nicht ununterscheidbar in einem gemeinsamen Export vermischt werden.
-
 ---
 
-# 8. Erfassungsumfang Version 1
+# 9. Erfassungsumfang Version 1
 
 ## Core
 
@@ -356,7 +347,7 @@ Workspaces, Host Pools, Application Groups, Session Hosts, Settings, Start VM on
 
 ## Storage / Backup / Key Vault
 
-Storage-Konfigurationsmetadaten, Backup-Vaults/-Policies/-Protected Items sowie Key-Vault-Konfiguration. Keine Blob-/Dateiinhalte, Backup-Inhalte, Secrets, Keys oder Private Keys.
+Storage-Konfigurationsmetadaten, Backup-Vaults/-Policies/-Protected Items und Key-Vault-Konfiguration. Keine Blob-/Dateiinhalte, Backup-Inhalte, Secrets, Keys oder Private Keys.
 
 ## Security / Governance
 
@@ -368,9 +359,7 @@ Log Analytics, Diagnostic Settings, Action Groups, Alerts, Automation Accounts, 
 
 ---
 
-# 9. Export und Datenmodell
-
-Ein Lauf erzeugt einen tenantbezogenen Exportordner mit:
+# 10. Export und Datenmodell
 
 ```text
 <Tenant>_<Timestamp>/
@@ -381,17 +370,15 @@ Ein Lauf erzeugt einen tenantbezogenen Exportordner mit:
 +-- Logs/
 ```
 
-Spätere Fachmodule ergänzen eigene Unterordner.
+Resource ID ist der bevorzugte technische Primärschlüssel. Arrays werden stabil sortiert. Nicht verfügbare Werte werden nicht erfunden.
 
-Resource ID ist der bevorzugte technische Primärschlüssel für Beziehungen.
-
-Arrays werden stabil sortiert. Nicht verfügbare Werte werden nicht erfunden.
+`Output/` bleibt von Git ausgeschlossen.
 
 ---
 
-# 10. Relationship Engine
+# 11. Relationship Engine
 
-Ziel ist ein einheitliches Beziehungsmodell, unter anderem:
+Zielbeziehungen unter anderem:
 
 ```text
 VM -> NIC -> Subnet -> VNet
@@ -406,15 +393,15 @@ Backup -> Protected Resource
 
 ---
 
-# 11. Logging und Fehlerbehandlung
+# 12. Logging und Fehlerbehandlung
 
-Logs enthalten mindestens Zeitstempel, Level, Modul/Aktion und Ergebnis; niemals Secrets oder Access Tokens.
+Logs enthalten Zeitstempel, Level, Modul/Aktion und Ergebnis; niemals Secrets oder Access Tokens.
 
 Kritische Fehler:
 
 - Read-only-Verifikation fehlgeschlagen,
 - PowerShell-Mindestversion fehlt,
-- erforderliche Dependency kann nicht bereitgestellt werden,
+- Dependency kann nicht bereitgestellt werden,
 - Azure-Authentifizierung nicht möglich,
 - Tenant/Subscription nicht erreichbar,
 - Core-Export nicht möglich.
@@ -428,21 +415,15 @@ Geplante Exit-Code-Kategorien:
 3  Auth/Berechtigung Core
 4  lokaler Export/Dateisystem
 5  unerwarteter interner Fehler
-6  Read-only-Verifikation fehlgeschlagen
-7  Runtime/Dependency-Voraussetzung fehlgeschlagen
+6  Read-only-Verifikation
+7  Runtime/Dependency-Voraussetzung
 ```
-
----
-
-# 12. Sicherheit des Exports
-
-Exporte enthalten schützenswerte Infrastrukturinformationen und dürfen nicht unkontrolliert weitergegeben oder in öffentliche Git-Repositories committed werden. `Output/` bleibt von Git ausgeschlossen.
 
 ---
 
 # 13. KI-Grenze
 
-Der Collector benötigt keine KI. Die KI verarbeitet erst den deterministischen Export.
+Der Collector benötigt keine KI.
 
 ```text
 Azure -> Collector -> JSON -> AI Documentation Pipeline -> Markdown/DOCX/PDF/Diagramme
@@ -468,25 +449,29 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 
 - [x] Fail-Closed Guard
 - [x] Azure-Allowlist
-- [x] direkte REST-/CLI-/dynamische Ausführung im MVP blockieren
+- [x] direkte REST-/CLI-/dynamische Ausführung blockieren
 - [x] `Set-AzContext` nur `-Scope Process`
 - [x] separater Prüfaufruf
-- [x] Pester-Tests
-- [x] GitHub Actions Gate
-- [x] initiale manuelle Verifikation
+- [x] Pester-Tests implementiert
+- [x] GitHub Actions Gate implementiert
+- [x] initiale manuelle/statische Verifikation
+- [ ] lokaler PowerShell-Gate-/Pester-Lauf vor erstem Azure-Test
 
 ## P0b – Bootstrap / Dependencies
 
-- [ ] `Start-AzureInfrastructureCollector.ps1`
-- [ ] `Collector.Bootstrap.psm1`
-- [ ] PowerShell 7.2+ prüfen
-- [ ] fehlende Runtime kontrolliert melden
-- [ ] `Az.Accounts` automatisch `CurrentUser` installieren
-- [ ] `Az.ResourceGraph` automatisch `CurrentUser` installieren
-- [ ] Dependencies nach Installation erneut verifizieren
-- [ ] keine Self-Elevation
-- [ ] Bootstrap-Tests
-- [ ] Read-only-Gate nach Bootstrap-Erweiterung erneut verifizieren
+- [x] `Start-AzureInfrastructureCollector.ps1`
+- [x] `Collector.Bootstrap.psm1`
+- [x] PowerShell 7.2+ prüfen
+- [x] fehlende Runtime kontrolliert melden
+- [x] `Az.Accounts` automatisch `CurrentUser` installieren
+- [x] `Az.ResourceGraph` automatisch `CurrentUser` installieren
+- [x] Dependencies nach Installation erneut prüfen/importieren
+- [x] keine Self-Elevation
+- [x] keine `AllUsers`-Installation
+- [x] keine automatische Repository-Mutation
+- [x] Bootstrap-Tests implementiert
+- [x] Read-only-Gate um Bootstrap-Grenze erweitert
+- [ ] lokaler Bootstrap-/Pester-Test vor erstem Azure-Test
 
 ## P1 – Core
 
@@ -523,7 +508,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 
 ## P6 – Storage / Backup / Key Vault
 
-- [ ] Metadaten, Secret-Filtering verifizieren
+- [ ] Metadaten und Secret-Filtering
 
 ## P7 – Security / Governance
 
@@ -561,30 +546,20 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 1. Keine kundenspezifischen Sonderfälle im Core.
 2. Keine stillen Annahmen.
 3. Keine Secrets in Source Control.
-4. Neue Azure-Aufrufe benötigen einen dokumentierten Read-only-Nachweis.
-5. Unbekannte Azure-Aufrufe werden durch das Gate blockiert.
+4. Neue Azure-Aufrufe benötigen dokumentierten Read-only-Nachweis.
+5. Unbekannte Azure-Aufrufe werden blockiert.
 6. Bootstrap und Collector bleiben getrennte Verantwortlichkeiten.
 7. Lokale Dependency-Installation nur `CurrentUser`.
 8. Keine Self-Elevation.
 9. PowerShell 7 wird nicht automatisch installiert.
-10. Architektur-/Scope-Änderungen werden zuerst in diesem Dokument festgelegt.
+10. Keine automatische PowerShell-Repository-Mutation.
+11. Architektur-/Scope-Änderungen werden zuerst in diesem Dokument festgelegt.
 
 ---
 
-# 16. Definition of Done für ein Collector-Modul
+# 16. Definition of Done Collector-Modul
 
-Ein Modul gilt erst als fertig, wenn:
-
-- kundengenerisch,
-- Multi-Subscription-fähig,
-- Scope-Filter respektiert,
-- Azure-Aufrufe read-only verifiziert,
-- Fehler/Berechtigungen transparent,
-- keine Secrets,
-- stabile Daten/JSON,
-- Unit Tests,
-- Manifest-/Dokumentationsintegration,
-- abschließende Read-only-Verifikation erfolgreich.
+Ein Modul gilt erst als fertig, wenn es kundengenerisch ist, Scope-Filter respektiert, Azure-Aufrufe read-only verifiziert sind, Fehler/Berechtigungen transparent behandelt werden, keine Secrets exportiert werden, Daten stabil sind, Tests vorhanden sind und die abschließende Read-only-Verifikation erfolgreich ist.
 
 ---
 
@@ -592,11 +567,11 @@ Ein Modul gilt erst als fertig, wenn:
 
 Version 1.0 erfordert insbesondere:
 
-1. kundengenerische Ausführung ohne lokale Administratorrechte für den normalen Lauf,
-2. Bootstrap kann fehlende unterstützte PowerShell-Module im Benutzerkontext bereitstellen,
+1. normaler Lauf ohne lokale Administratorrechte,
+2. Bootstrap kann unterstützte fehlende Module im Benutzerkontext bereitstellen,
 3. keine Self-Elevation,
 4. Tenant-/Multi-Subscription-/RG-Scope,
-5. alle geplanten Fachbereiche,
+5. geplante Fachbereiche,
 6. strukturierter Export mit Manifest/Summary/Relationships,
 7. Secret Filtering und Berechtigungsfehler getestet,
 8. realistischer Kundenexport erfolgreich,
@@ -626,7 +601,7 @@ P10  Tests / Härtung
 P11  Release 1.0
 ```
 
-P0a und P0b sind vor dem ersten realen Azure-Test abzuschließen.
+**Vor dem ersten realen Azure-Test sind jetzt nur noch die lokalen PowerShell-Ausführungen des Gates und der Pester-Suite offen.**
 
 ---
 
@@ -659,4 +634,4 @@ KI interpretiert und formuliert
 Dokumente und Diagramme präsentieren das Ergebnis
 ```
 
-**Über allem steht: Ohne unmittelbar zuvor erfolgreich abgeschlossene Read-only-Verifikation darf kein ausführbarer Collector-Stand zur Ausführung freigegeben werden.**
+**Ohne unmittelbar zuvor erfolgreich abgeschlossene Read-only-Verifikation darf kein realer Azure-Lauf freigegeben werden.**
