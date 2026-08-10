@@ -6,6 +6,12 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 
 ### Added
 
+- canonical Azure-free `Tools/Invoke-PreAzureValidation.ps1` workflow
+- pre-Azure validation sequence: read-only gate -> Pester prerequisite -> Pester suite -> final read-only gate
+- automatic installation of missing Pester 5.5.0+ with `Install-Module -Scope CurrentUser`
+- explicit final `READY FOR AZURE TEST` status only after all mandatory local checks pass
+- central `validation.minimumPesterVersion` configuration
+- GitHub Actions now uses the same canonical pre-Azure validation workflow as local validation
 - preferred bootstrap entry point `Start-AzureInfrastructureCollector.ps1`
 - reusable `Collector.Bootstrap.psm1`
 - automatic detection of required Az modules before collector execution
