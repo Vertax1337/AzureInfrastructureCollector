@@ -49,6 +49,7 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 
 ### Fixed
 
+- preferred bootstrap login now falls back from failed WAM/browser authentication to `Connect-AzAccount -UseDeviceAuthentication`, while keeping the Az context process-scoped and preserving the non-interactive no-prompt behavior
 - Pester validation no longer accepts an arbitrary newer major version; the validation runtime is deterministic at Pester 6.0.1
 - bootstrap tests migrated from removed `Assert-MockCalled` assertions to Pester 6 `Should -Invoke`, preventing legacy Pester 3.4.0 from being auto-loaded to satisfy deprecated commands
 - validation removes already-loaded Pester modules and imports the exact configured module path before running tests, preventing mixed Pester-generation command resolution
