@@ -51,6 +51,18 @@ Describe 'Protect-CollectorExportValue' {
 
         $result.Documentation | Should -Be $url
     }
+
+    It 'preserves empty arrays as empty arrays instead of null' {
+        $result = Protect-CollectorExportValue `
+            -Value ([ordered]@{ Errors = @(); Filters = @() }) `
+            -SensitivePropertyPattern $propertyPattern `
+            -SensitiveValuePatterns $valuePatterns
+
+        @($result.Errors).Count | Should -Be 0
+        @($result.Filters).Count | Should -Be 0
+        ($result.Errors -is [System.Array]) | Should -BeTrue
+        ($result.Filters -is [System.Array]) | Should -BeTrue
+    }
 }
 
 Describe 'Resolve-CollectorResourceGroupReferences' {
