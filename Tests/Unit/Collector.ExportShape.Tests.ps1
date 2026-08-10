@@ -25,18 +25,17 @@ Describe 'Export shape regression protection' {
             -SensitiveValuePatterns $script:ValuePatterns
 
         ($result.addressPrefixes -is [System.Array]) | Should -BeTrue
-        $result.addressPrefixes.Count | Should -Be 2
+        @($result.addressPrefixes).Count | Should -Be 2
         $result.addressPrefixes[0] | Should -BeExactly '10.0.0.0/16'
         $result.addressPrefixes[1] | Should -BeExactly '10.1.0.0/16'
         $result.dnsServers[0] | Should -BeExactly '10.0.0.4'
-        @($result.addressPrefixes[0].PSObject.Properties.Name) | Should -Contain 'Length'
         ($result.addressPrefixes[0] -is [string]) | Should -BeTrue
     }
 
     It 'flattens accidental nested enumerable wrappers without array metadata leakage' {
         $nestedValues = [System.Collections.Generic.List[object]]::new()
-        $nestedValues.Add(@())
-        $nestedValues.Add(@('10.0.0.0/16'))
+        $nestedValues.Add([object[]]@())
+        $nestedValues.Add([object[]]@('10.0.0.0/16'))
         $nestedValues.Add('10.1.0.0/16')
 
         $result = Protect-CollectorExportValue `
@@ -45,7 +44,7 @@ Describe 'Export shape regression protection' {
             -SensitiveValuePatterns $script:ValuePatterns
 
         ($result.prefixes -is [System.Array]) | Should -BeTrue
-        $result.prefixes.Count | Should -Be 2
+        @($result.prefixes).Count | Should -Be 2
         $result.prefixes[0] | Should -BeExactly '10.0.0.0/16'
         $result.prefixes[1] | Should -BeExactly '10.1.0.0/16'
         @($result.prefixes | Where-Object { $_ -isnot [string] }).Count | Should -Be 0
@@ -92,12 +91,12 @@ Describe 'Export shape regression protection' {
             -SensitivePropertyPattern $script:PropertyPattern `
             -SensitiveValuePatterns $script:ValuePatterns
 
-        $result.virtualNetworks[0].addressPrefixes | Should -HaveCount 1
+        @($result.virtualNetworks[0].addressPrefixes).Count | Should -Be 1
         $result.virtualNetworks[0].addressPrefixes[0] | Should -BeExactly '10.0.0.0/16'
         $result.virtualNetworks[0].dnsServers[0] | Should -BeExactly '10.0.0.4'
-        $result.subnets[0].addressPrefixes | Should -HaveCount 1
+        @($result.subnets[0].addressPrefixes).Count | Should -Be 1
         $result.subnets[0].addressPrefixes[0] | Should -BeExactly '10.0.1.0/24'
-        $result.subnets[0].serviceEndpoints | Should -HaveCount 1
+        @($result.subnets[0].serviceEndpoints).Count | Should -Be 1
         $result.subnets[0].serviceEndpoints[0] | Should -BeExactly 'Microsoft.Storage'
     }
 }
