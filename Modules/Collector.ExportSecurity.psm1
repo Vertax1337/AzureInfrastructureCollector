@@ -117,12 +117,12 @@ function Resolve-CollectorResourceGroupReferences {
             }
 
             if ($copy.Contains('resourceGroup')) {
-                $subscriptionId = [string]$copy.subscriptionId
-                $resourceGroupName = [string]$copy.resourceGroup
+                $subscriptionId = [string]$copy['subscriptionId']
+                $resourceGroupName = [string]$copy['resourceGroup']
                 if (-not [string]::IsNullOrWhiteSpace($subscriptionId) -and -not [string]::IsNullOrWhiteSpace($resourceGroupName)) {
                     $key = '{0}|{1}' -f $subscriptionId, $resourceGroupName
                     if ($canonicalNames.ContainsKey($key)) {
-                        $copy.resourceGroup = $canonicalNames[$key]
+                        $copy['resourceGroup'] = $canonicalNames[$key]
                     }
                 }
             }
@@ -174,7 +174,7 @@ function New-CollectorPublicManifest {
                 $execution[$executionProperty.Name] = $executionProperty.Value
             }
         }
-        $publicManifest.execution = [pscustomobject]$execution
+        $publicManifest['execution'] = [pscustomobject]$execution
     }
 
     return [pscustomobject]$publicManifest
