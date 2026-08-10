@@ -69,7 +69,7 @@ function Protect-CollectorExportValue {
     }
 
     if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
-        return @(
+        $sanitizedItems = @(
             $Value | ForEach-Object {
                 Protect-CollectorExportValue `
                     -Value $_ `
@@ -77,6 +77,10 @@ function Protect-CollectorExportValue {
                     -SensitiveValuePatterns $SensitiveValuePatterns
             }
         )
+
+        # Return the array as one pipeline object so empty arrays remain [] instead of
+        # disappearing and becoming $null in a parent property assignment.
+        return ,$sanitizedItems
     }
 
     if (Test-CollectorSensitiveScalarValue -Value $Value -SensitiveValuePatterns $SensitiveValuePatterns) {
