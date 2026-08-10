@@ -43,6 +43,7 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - paginated Azure Resource Graph query helper
 - generic resource and resource-group KQL queries
 - normalized resource and resource-group JSON models
+- visible four-stage collection progress with timestamps, `Write-Progress` status during Azure Resource Graph waits, collected-object counts, JSON-write status and total run duration
 - defense-in-depth redaction of sensitive-looking keys
 - tenant-specific timestamped export structure
 - `manifest.json`, `summary.json` and collector log
