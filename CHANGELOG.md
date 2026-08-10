@@ -8,12 +8,13 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 
 - PowerShell 7.6 LTS (`7.6.0+`) as the supported runtime baseline
 - canonical Azure-free `Tools/Invoke-PreAzureValidation.ps1` workflow
+- automatic invocation of the complete pre-Azure validation from `Start-AzureInfrastructureCollector.ps1`; operators no longer need a separate validation command before a normal collector run
 - pre-Azure validation sequence: read-only gate -> Pester prerequisite -> Pester suite -> final read-only gate
 - exact Pester `6.0.1` validation pin via `validation.requiredPesterVersion`
 - automatic installation of exactly Pester 6.0.1 with `Install-Module -RequiredVersion 6.0.1 -Scope CurrentUser`
 - explicit isolation/import of the selected Pester module path before validation
 - explicit final `READY FOR AZURE TEST` status only after all mandatory local checks pass
-- GitHub Actions now uses the same canonical pre-Azure validation workflow as local validation
+- GitHub Actions uses the same canonical pre-Azure validation workflow as local validation
 - preferred bootstrap entry point `Start-AzureInfrastructureCollector.ps1`
 - reusable `Collector.Bootstrap.psm1`
 - automatic detection of required Az modules before collector execution
@@ -49,7 +50,9 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 
 ### Fixed
 
-- preferred bootstrap login now falls back from failed WAM/browser authentication to `Connect-AzAccount -UseDeviceAuthentication`, while keeping the Az context process-scoped and preserving the non-interactive no-prompt behavior
+- Azure authentication temporarily forces plain-text rendering (`$PSStyle.OutputRendering = PlainText` plus `NO_COLOR`) so device-code/login text is copyable without raw ANSI escape sequences; previous rendering settings are restored afterwards
+- normal bootstrap import suppresses PowerShell's unapproved-verb discoverability warning without changing module behavior
+- preferred bootstrap login falls back from failed WAM/browser authentication to `Connect-AzAccount -UseDeviceAuthentication`, while keeping the Az context process-scoped and preserving the non-interactive no-prompt behavior
 - Pester validation no longer accepts an arbitrary newer major version; the validation runtime is deterministic at Pester 6.0.1
 - bootstrap tests migrated from removed `Assert-MockCalled` assertions to Pester 6 `Should -Invoke`, preventing legacy Pester 3.4.0 from being auto-loaded to satisfy deprecated commands
 - validation removes already-loaded Pester modules and imports the exact configured module path before running tests, preventing mixed Pester-generation command resolution
