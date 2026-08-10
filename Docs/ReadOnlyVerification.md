@@ -84,14 +84,27 @@ It performs:
 
 1. PowerShell 7.6 LTS runtime validation,
 2. initial `READ-ONLY VERIFIED` source-code gate,
-3. Pester 5.5.0+ discovery,
-4. if necessary, Pester installation from the already registered `PSGallery` with literal `-Scope CurrentUser`,
-5. complete Pester execution for `./Tests` with `-PassThru`,
-6. failure if any Pester test fails or no result can be proven,
-7. final read-only source-code gate,
-8. final `READY FOR AZURE TEST` status only if every mandatory check succeeded.
+3. exact Pester **6.0.1** discovery,
+4. if necessary, installation of exactly Pester 6.0.1 from the already registered `PSGallery` with literal `-Scope CurrentUser`,
+5. removal of any already-loaded Pester module from the current validation session,
+6. import of the exact configured Pester 6.0.1 module path,
+7. verification that the required validation commands resolve from the `Pester` module,
+8. complete Pester execution for `./Tests` with `-PassThru`,
+9. failure if any Pester test fails or no result can be proven,
+10. final read-only source-code gate,
+11. final `READY FOR AZURE TEST` status only if every mandatory check succeeded.
 
 The validation workflow does not call `Connect-AzAccount`, `Search-AzGraph`, or any other Azure operation. It performs no Azure authentication and no Azure request.
+
+### Pester version isolation
+
+The validation dependency is intentionally pinned as `validation.requiredPesterVersion = 6.0.1`.
+
+This avoids accepting a future major Pester release without explicit project verification. It also prevents legacy system/inbox Pester versions from influencing the current validation run.
+
+The project test suite uses Pester 6 syntax. In particular, the removed legacy `Assert-MockCalled` command has been replaced with `Should -Invoke`. This prevents PowerShell from auto-loading an old Pester 3.x module merely to resolve the legacy command.
+
+An old Pester version such as 3.4.0 may remain installed on the workstation; it is not used by the validation workflow.
 
 ## Automatic fail-closed gate
 
@@ -145,7 +158,7 @@ The Azure test is permitted only if the workflow completes with:
 PRE-AZURE VALIDATION RESULT
 Status: READY FOR AZURE TEST
 Initial read-only gate: READ-ONLY VERIFIED
-Pester: <version>; Passed: <n>; Failed: 0; Skipped: <n>
+Pester: 6.0.1; Passed: <n>; Failed: 0; Skipped: <n>
 Final read-only gate: READ-ONLY VERIFIED
 Azure access performed: NO
 Administrator elevation: NOT USED
@@ -153,4 +166,4 @@ Administrator elevation: NOT USED
 
 ## Future changes
 
-Any new or changed Azure command, API path, dependency mechanism, module mutation path or executable code invalidates the previous approval until the mandatory pre-Azure validation has been repeated successfully.
+Any new or changed Azure command, API path, dependency mechanism, Pester validation version, module mutation path or executable code invalidates the previous approval until the mandatory pre-Azure validation has been repeated successfully.
