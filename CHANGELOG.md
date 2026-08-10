@@ -59,6 +59,8 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - `Inventory/network.json` plus nested `summary.network` output
 - six P3 network Pester tests covering query safety, topology normalization, NSG rule minimization, VPN connection secret exclusion and empty-collection stability
 - three additional export-shape regression tests covering string-array preservation, nested enumerable flattening and hardened network address fields
+- Local Network Gateway FQDN collection via `properties.fqdn`, normalized independently as `localNetworkGateways[].fqdn`
+- two dedicated Local Network Gateway FQDN tests covering safe query projection and independent IP/FQDN normalization
 - `Docs/P3-Network.md` defining the P3a/P3b architecture and safety boundary
 
 ### Fixed
@@ -67,6 +69,7 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - export hardening now handles strings/value types and enumerables before PSCustomObject/ETS property inspection so string arrays remain actual values instead of objects such as `{ "Length": 12 }`
 - accidental nested enumerable wrappers are flattened during final export hardening so collection fields remain stable one-dimensional arrays instead of leaking PowerShell array metadata such as `Count`, `Length`, `SyncRoot` or `Rank`
 - the scalar/array export-shape fix also restores readable command-name strings in `readOnlyVerification.json.approvedAzureCommandsFound`
+- Local Network Gateway endpoint documentation no longer relies on `gatewayIpAddress` alone; FQDN-configured endpoints are now collected into a separate `fqdn` field
 - `resources.json` now uses the canonical Resource Group spelling from `resourceGroups.json` for the same subscription instead of preserving inconsistent Resource Graph casing
 - `readOnlyVerification.json` no longer exposes the local collector repository path (`repositoryRoot`)
 - `manifest.json` no longer exports the executing Azure account/UPN
