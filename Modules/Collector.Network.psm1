@@ -470,6 +470,7 @@ function ConvertTo-CollectorNetworkInventory {
                     resourceGroup     = $resourceGroup
                     location          = $location
                     gatewayIpAddress  = [string](Get-CollectorNetworkProperty $row 'localGatewayIpAddress')
+                    fqdn              = [string](Get-CollectorNetworkProperty $row 'localGatewayFqdn')
                     addressPrefixes   = ConvertTo-CollectorNetworkStringArray (Get-CollectorNetworkProperty $row 'localGatewayAddressPrefixes')
                     bgpAsn            = Get-CollectorNetworkProperty $row 'localGatewayBgpAsn'
                     bgpPeerWeight     = Get-CollectorNetworkProperty $row 'localGatewayBgpPeerWeight'
