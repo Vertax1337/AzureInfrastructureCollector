@@ -9,13 +9,13 @@
 
 ---
 
-# 0. OBERSTE REGEL – READ-ONLY MUSS VOR JEDER AUSFÜHRUNGSFREIGABE VERIFIZIERT SEIN
+# 0. OBERSTE REGEL – READ-ONLY MUSS VOR JEDER AZURE-AUSFÜHRUNGSFREIGABE VERIFIZIERT SEIN
 
 > **Diese Regel hat Vorrang vor allen anderen Anforderungen, Architekturentscheidungen, Features, Entwicklungszielen und Zeitplänen dieses Projekts.**
 
 Der **AzureInfrastructureCollector darf unter keinen Umständen Azure-Ressourcen, Azure-Konfigurationen, Azure-Datenbestände oder andere Azure-seitige Zustände verändern.**
 
-Ein Skriptstand, Modul, Hotfix, Testskript oder ausführbarer Code darf erst dann für einen realen Azure-Lauf freigegeben werden, wenn die abschließende Read-only-Verifikation erfolgreich war und eindeutig `READ-ONLY VERIFIED` liefert.
+Ein Skriptstand, Modul, Hotfix, Testskript oder ausführbarer Code darf erst dann für einen realen Azure-Lauf freigegeben werden, wenn die vorgeschriebene Pre-Azure-Validierung erfolgreich abgeschlossen wurde und dabei sowohl die abschließende Read-only-Verifikation `READ-ONLY VERIFIED` als auch der Gesamtstatus `READY FOR AZURE TEST` erreicht wurden.
 
 Kann Read-only nicht zweifelsfrei bestätigt werden, gilt der Stand als **nicht freigegeben**.
 
@@ -30,7 +30,7 @@ Zulässig sind ausschließlich:
 - lokales PowerShell-/Az-Context-Switching ohne Azure-Ressourcenänderung,
 - lokale Normalisierung und Auswertung,
 - lokale Export-, Log-, Manifest-, Summary- und ZIP-Erzeugung,
-- lokale Installation der explizit benötigten PowerShell-Abhängigkeiten im Benutzerkontext durch den getrennten Bootstrap.
+- lokale Installation explizit benötigter PowerShell-Abhängigkeiten im Benutzerkontext mit `-Scope CurrentUser`.
 
 `Connect-AzAccount` und `Set-AzContext -Scope Process` sind zulässig, solange dadurch ausschließlich Authentifizierung bzw. lokaler Sitzungskontext verändert werden.
 
@@ -48,7 +48,7 @@ Nicht zulässig sind insbesondere:
 
 ## 0.3 Keine reine Verb-Prüfung
 
-Read-only wird anhand der **tatsächlichen Wirkung** beurteilt. `Set-AzContext -Scope Process` ist zulässig, obwohl das Verb `Set` lautet, weil keine Azure-Ressource verändert wird.
+Read-only wird anhand der **tatsächlichen Wirkung** beurteilt. `Set-AzContext -Scope Process` ist beispielsweise zulässig, obwohl das Verb `Set` lautet, weil keine Azure-Ressource verändert wird.
 
 ## 0.4 Fail Closed
 
@@ -70,31 +70,46 @@ Vor jeder realen Azure-Ausführungsfreigabe werden mindestens geprüft:
 5. eingebundene Module und Skripte,
 6. KQL-Abfragen,
 7. Parameter- und Fallback-Pfade,
-8. Änderungen seit der letzten Verifikation.
+8. lokale Dependency-/Elevationspfade,
+9. Änderungen seit der letzten Verifikation.
 
-## 0.6 Verbindlicher Status
+## 0.6 Verbindlicher Read-only-Status
 
 ```text
 READ-ONLY VERIFICATION
 Status: READ-ONLY VERIFIED
-Azure resource mutations: NONE
-Azure data mutations: NONE
-Control-plane write operations: NONE
-Data-plane write operations: NONE
-Local writes: approved local bootstrap/export operations only
+Azure resource mutations: NONE DETECTED
+Azure data mutations: NONE DETECTED
+Control-plane write operations: NONE DETECTED
+Data-plane write operations: NONE DETECTED
+Local writes: approved local CurrentUser bootstrap/export operations only
 ```
 
-## 0.7 Automatisches Gate
+## 0.7 Verbindlicher Pre-Azure-Status
+
+```text
+PRE-AZURE VALIDATION RESULT
+Status: READY FOR AZURE TEST
+Initial read-only gate: READ-ONLY VERIFIED
+Pester: <version>; Failed: 0
+Final read-only gate: READ-ONLY VERIFIED
+Azure access performed: NO
+Administrator elevation: NOT USED
+```
+
+Nur dieser Gesamtstatus erlaubt den anschließenden realen Azure-Test des aktuellen ausführbaren Standes.
+
+## 0.8 Automatisches Gate
 
 Das Projekt besitzt ein Fail-Closed-Gate. Unbekannte Azure-Aufrufe, direkte REST-/CLI-Pfade, dynamische Befehlsausführung und nicht genehmigte lokale Mutationspfade blockieren die Freigabe.
 
 Automatische Prüfungen ersetzen nicht die fachliche Prüfung eines neuen Azure-Aufrufs.
 
-## 0.8 Änderungen an dieser Regel
+## 0.9 Änderungen an dieser Regel
 
 Eine Aufweichung ist nur nach expliziter Entscheidung des Projektverantwortlichen und vorheriger Änderung dieser Source of Truth zulässig.
 
-> **Keine bestätigte Read-only-Verifikation = keine Azure-Ausführungsfreigabe.**
+> **Keine bestätigte Read-only-Verifikation und kein `READY FOR AZURE TEST` = keine Azure-Ausführungsfreigabe.**
 
 ---
 
@@ -118,19 +133,31 @@ Datenerfassung und spätere KI-/Dokumentgenerierung bleiben getrennt.
 # 2. Ausführungsarchitektur
 
 ```text
+Entwicklung / neuer ausführbarer Stand
+   |
+   v
+Tools/Invoke-PreAzureValidation.ps1
+   |
+   +--> PowerShell 7.2+ prüfen
+   +--> Read-only Gate #1
+   +--> Pester 5.5.0+ prüfen
+   +--> falls nötig Pester nur CurrentUser installieren
+   +--> vollständige Pester-Suite
+   +--> Read-only Gate #2
+   |
+   +--> READY FOR AZURE TEST
+            |
+            v
 Benutzer
    |
    v
 Start-AzureInfrastructureCollector.ps1
    |
-   +--> minimaler lokaler PowerShell-Runtime-Preflight
-   |      +--> PS 7.2+ vorhanden? sonst kontrollierter Abbruch
-   |
-   +--> Read-only Gate über den lokalen ausführbaren Source-Code
-   |
-   +--> Dependency Bootstrap
-   |      +--> Az.Accounts prüfen
-   |      +--> Az.ResourceGraph prüfen
+   +--> PowerShell-Runtime-Preflight
+   +--> Read-only Gate
+   +--> Runtime Dependencies
+   |      +--> Az.Accounts
+   |      +--> Az.ResourceGraph
    |      +--> fehlende Module nur CurrentUser installieren
    |
    v
@@ -150,13 +177,13 @@ Normalisiertes JSON-Modell
    +--> Logs
 ```
 
-Der minimale Runtime-Preflight vor dem Gate greift **nicht auf Azure zu und verändert lokal nichts**. Er existiert ausschließlich, damit Windows PowerShell 5.1 kontrolliert abgewiesen werden kann, bevor PowerShell-7-spezifischer Guard-Code geladen wird.
+Die Pre-Azure-Validierung selbst führt **keine Azure-Authentifizierung und keine Azure-Abfrage** durch.
 
 ---
 
-# 3. Bootstrap / lokale Voraussetzungen
+# 3. Lokale Voraussetzungen und Bootstrap
 
-## 3.1 Bevorzugter Einstiegspunkt
+## 3.1 Bevorzugter Collector-Einstiegspunkt
 
 ```powershell
 ./Start-AzureInfrastructureCollector.ps1
@@ -172,17 +199,19 @@ Verboten sind insbesondere:
 - Neustart als Administrator,
 - automatisches Nachladen eines administrativen Tokens.
 
-Der normale Collector-Lauf soll ohne lokale Administratorrechte möglich sein.
+Der normale Collector-Lauf und die Pre-Azure-Validierung sollen ohne lokale Administratorrechte möglich sein.
 
 ## 3.3 PowerShell 7
 
 Mindestversion: **PowerShell 7.2**.
 
-PowerShell selbst wird nicht automatisch installiert oder aktualisiert. Fehlt die Mindestversion, bricht der Bootstrap kontrolliert ab. Eine PowerShell-Installation bleibt ein separater bewusster Arbeitsplatz-/Adminvorgang.
+PowerShell selbst wird nicht automatisch installiert oder aktualisiert. Fehlt die Mindestversion, wird kontrolliert abgebrochen. Eine PowerShell-Installation bleibt ein separater bewusster Arbeitsplatz-/Adminvorgang.
 
-## 3.4 Dependency Policy
+Legacy Windows PowerShell 5.1 (`powershell.exe`) ist kein unterstützter Runtime-Pfad. Für das Projekt ist `pwsh.exe` zu verwenden.
 
-Initial benötigt:
+## 3.4 Runtime-Dependency-Policy
+
+Initial benötigt der Collector:
 
 - `Az.Accounts`,
 - `Az.ResourceGraph`.
@@ -199,9 +228,22 @@ Bootstrap-Verhalten:
 8. Module nach Installation erneut erkennen und importieren,
 9. bei Fehler kontrolliert abbrechen.
 
-Pester ist nur Entwicklungs-/Testabhängigkeit und nicht Voraussetzung für einen normalen Collector-Lauf.
+## 3.5 Validierungs-Dependency Pester
 
-## 3.5 Vom Gate erzwungene lokale Grenze
+Pester ist **keine Runtime-Abhängigkeit des normalen Collectors**, sondern die verpflichtende Testabhängigkeit der Pre-Azure-Validierung.
+
+Aktuelle Mindestversion: **Pester 5.5.0**, zentral definiert als `validation.minimumPesterVersion` in `Config/collector.config.json`.
+
+`Tools/Invoke-PreAzureValidation.ps1`:
+
+1. erkennt vorhandenes Pester ab Mindestversion,
+2. installiert fehlendes Pester ausschließlich aus bereits registrierter `PSGallery`,
+3. verwendet ausschließlich `Install-Module -Scope CurrentUser`,
+4. führt keine UAC-Elevation durch,
+5. ändert keine Repository-Konfiguration,
+6. bricht bei nicht beweisbarem Testzustand ab.
+
+## 3.6 Vom Gate erzwungene lokale Grenze
 
 Zulässig ist im ausführbaren Projektcode ausschließlich die explizite `Install-Module -Scope CurrentUser`-Dependency-Installation.
 
@@ -213,43 +255,103 @@ Das Gate blockiert unter anderem:
 - `Save-Module`,
 - PowerShell-Repository-Registrierung/-Änderung,
 - alternative Package-/PSResource-Mutationspfade,
-- `Start-Process`.
+- `Start-Process`,
+- direkte REST/Web-Ausführung,
+- Azure CLI,
+- dynamische Befehlsausführung.
 
 ---
 
-# 4. Collector-Kernprinzipien
+# 4. Pre-Azure-Validierung
 
-## 4.1 Kundengenerisch
+## 4.1 Kanonischer Befehl
+
+```powershell
+./Tools/Invoke-PreAzureValidation.ps1
+```
+
+Explizit aus einer anderen Shell:
+
+```powershell
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Invoke-PreAzureValidation.ps1
+```
+
+## 4.2 Ablauf
+
+```text
+PowerShell Runtime
+      |
+      v
+Read-only Gate #1
+      |
+      v
+Pester vorhanden?
+      |
+      +-- nein --> CurrentUser installieren
+      |
+      v
+Pester-Suite ./Tests
+      |
+      v
+Read-only Gate #2
+      |
+      +-- alles erfolgreich --> READY FOR AZURE TEST
+      |
+      +-- Fehler/unklar ------> BLOCKED
+```
+
+## 4.3 Freigabebedingung
+
+Ein realer Azure-Test des aktuellen Standes ist nur zulässig, wenn:
+
+- initiales Gate `READ-ONLY VERIFIED`,
+- Pester-Fehleranzahl `0`,
+- finales Gate `READ-ONLY VERIFIED`,
+- Gesamtstatus `READY FOR AZURE TEST`.
+
+Ändert sich anschließend ausführbarer Code, ist die Freigabe erneut durchzuführen.
+
+## 4.4 GitHub Actions
+
+`.github/workflows/read-only-gate.yml` verwendet denselben kanonischen `Invoke-PreAzureValidation.ps1`-Pfad wie die lokale Prüfung.
+
+GitHub Actions erhält dabei nur `contents: read` auf das Repository.
+
+---
+
+# 5. Collector-Kernprinzipien
+
+## 5.1 Kundengenerisch
 
 Keine fest codierten Kunden-, Tenant-, Subscription-, Resource-Group- oder Ressourcennamen im Core.
 
-## 4.2 Tenantfähig
+## 5.2 Tenantfähig
 
 Ein Lauf besitzt genau einen Tenant-Kontext und kann mehrere Subscriptions erfassen. Mehrere Tenants werden später nacheinander verarbeitet und nie ununterscheidbar in einem Export vermischt.
 
-## 4.3 Resource Graph First
+## 5.3 Resource Graph First
 
 Azure Resource Graph ist die bevorzugte Quelle für breite Inventarisierung. Az PowerShell oder später geprüfte REST-Aufrufe werden nur verwendet, wenn Resource Graph erforderliche Details nicht liefert.
 
-## 4.4 Least Privilege
+## 5.4 Least Privilege
 
 Lokale Administratorrechte sind nicht vorgesehen. Azure-seitig soll Reader-orientierter Zugriff genügen, soweit einzelne Fachbereiche keine zusätzlichen Leserechte erfordern.
 
-## 4.5 Keine Secrets
+## 5.5 Keine Secrets
 
 Keine Kennwörter, Client Secrets, Storage Keys, SAS Tokens, Private Keys, Access Tokens, API Keys oder sonstigen Credential-Werte werden bewusst exportiert.
 
-## 4.6 Reproduzierbarkeit
+## 5.6 Reproduzierbarkeit
 
 Stabile Felder, konsistente Dateinamen, definierte Sortierung, ISO-8601-Zeitstempel, Resource IDs und Schema-/Collector-Versionen.
 
-## 4.7 Best Effort
+## 5.7 Best Effort
 
-Optionale Modulfehler können Partial Collection ergeben. Read-only-Verifikationsfehler sind immer kritisch.
+Optionale Modulfehler können Partial Collection ergeben. Read-only-/Pre-Azure-Verifikationsfehler sind immer kritisch.
 
 ---
 
-# 5. Repository-Struktur
+# 6. Repository-Struktur
 
 ```text
 AzureInfrastructureCollector/
@@ -278,12 +380,14 @@ AzureInfrastructureCollector/
 +-- Schemas/
 +-- Tests/
 +-- Tools/
+|   +-- Test-ReadOnlyCompliance.ps1
+|   +-- Invoke-PreAzureValidation.ps1
 +-- Docs/
 ```
 
 ---
 
-# 6. Bedienung und Parameter
+# 7. Bedienung und Parameter
 
 Bootstrap und Collector unterstützen initial:
 
@@ -293,13 +397,13 @@ Bootstrap und Collector unterstützen initial:
 - `-OutputPath`,
 - `-NonInteractive`.
 
-Der direkte Aufruf von `Collect-AzureDocumentation.ps1` bleibt für Entwicklung und vorbereitete Systeme möglich; dort müssen Dependencies bereits vorhanden sein.
+Der direkte Aufruf von `Collect-AzureDocumentation.ps1` bleibt für Entwicklung und vorbereitete Systeme möglich; dort müssen Runtime-Dependencies bereits vorhanden sein.
 
 Im `-NonInteractive`-Modus dürfen keine Eingabeprompts erforderlich sein.
 
 ---
 
-# 7. Authentifizierung und Azure-Kontext
+# 8. Authentifizierung und Azure-Kontext
 
 Version 1 unterstützt interaktive Anmeldung über `Connect-AzAccount` und vorhandene Az-Kontexte.
 
@@ -314,7 +418,7 @@ Credentials dürfen niemals im Repository hinterlegt werden.
 
 ---
 
-# 8. Scope-Modell
+# 9. Scope-Modell
 
 ```text
 Tenant
@@ -327,7 +431,7 @@ Tenant
 
 ---
 
-# 9. Erfassungsumfang Version 1
+# 10. Erfassungsumfang Version 1
 
 ## Core
 
@@ -359,7 +463,7 @@ Log Analytics, Diagnostic Settings, Action Groups, Alerts, Automation Accounts, 
 
 ---
 
-# 10. Export und Datenmodell
+# 11. Export und Datenmodell
 
 ```text
 <Tenant>_<Timestamp>/
@@ -376,7 +480,7 @@ Resource ID ist der bevorzugte technische Primärschlüssel. Arrays werden stabi
 
 ---
 
-# 11. Relationship Engine
+# 12. Relationship Engine
 
 Zielbeziehungen unter anderem:
 
@@ -393,35 +497,39 @@ Backup -> Protected Resource
 
 ---
 
-# 12. Logging und Fehlerbehandlung
+# 13. Logging und Fehlerbehandlung
 
 Logs enthalten Zeitstempel, Level, Modul/Aktion und Ergebnis; niemals Secrets oder Access Tokens.
 
 Kritische Fehler:
 
 - Read-only-Verifikation fehlgeschlagen,
+- Pre-Azure-Validierung nicht erfolgreich,
 - PowerShell-Mindestversion fehlt,
 - Dependency kann nicht bereitgestellt werden,
 - Azure-Authentifizierung nicht möglich,
 - Tenant/Subscription nicht erreichbar,
 - Core-Export nicht möglich.
 
-Geplante Exit-Code-Kategorien:
+Exit-Code-Kategorien:
 
 ```text
-0  Erfolg
-1  Partial Success / Warnungen
-2  Konfiguration
-3  Auth/Berechtigung Core
-4  lokaler Export/Dateisystem
-5  unerwarteter interner Fehler
-6  Read-only-Verifikation
-7  Runtime/Dependency-Voraussetzung
+0   Erfolg / READY FOR AZURE TEST
+1   Partial Success / Warnungen
+2   Konfiguration
+3   Auth/Berechtigung Core
+4   lokaler Export/Dateisystem
+5   unerwarteter interner Fehler
+6   Read-only-Verifikation
+7   PowerShell-Runtime
+8   lokale Dependency/Validation-Dependency
+9   Pester-Testfehler / Testzustand nicht beweisbar
+10  Pre-Azure-/Read-only-Freigabe blockiert
 ```
 
 ---
 
-# 13. KI-Grenze
+# 14. KI-Grenze
 
 Der Collector benötigt keine KI.
 
@@ -433,7 +541,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 
 ---
 
-# 14. Entwicklungsphasen
+# 15. Entwicklungsphasen
 
 ## P0 – Projektgrundlage
 
@@ -455,14 +563,13 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [x] Pester-Tests implementiert
 - [x] GitHub Actions Gate implementiert
 - [x] initiale manuelle/statische Verifikation
-- [ ] lokaler PowerShell-Gate-/Pester-Lauf vor erstem Azure-Test
+- [x] lokaler standalone Read-only-Gate-Lauf mit `READ-ONLY VERIFIED`
 
 ## P0b – Bootstrap / Dependencies
 
 - [x] `Start-AzureInfrastructureCollector.ps1`
 - [x] `Collector.Bootstrap.psm1`
 - [x] PowerShell 7.2+ prüfen
-- [x] fehlende Runtime kontrolliert melden
 - [x] `Az.Accounts` automatisch `CurrentUser` installieren
 - [x] `Az.ResourceGraph` automatisch `CurrentUser` installieren
 - [x] Dependencies nach Installation erneut prüfen/importieren
@@ -471,7 +578,18 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [x] keine automatische Repository-Mutation
 - [x] Bootstrap-Tests implementiert
 - [x] Read-only-Gate um Bootstrap-Grenze erweitert
-- [ ] lokaler Bootstrap-/Pester-Test vor erstem Azure-Test
+
+## P0c – Pre-Azure Validation
+
+- [x] `Tools/Invoke-PreAzureValidation.ps1`
+- [x] Pester-Mindestversion zentral konfigurieren
+- [x] fehlendes Pester automatisch nur `CurrentUser` installieren
+- [x] initiales Read-only-Gate
+- [x] vollständige Pester-Suite
+- [x] finales Read-only-Gate
+- [x] eindeutiger Status `READY FOR AZURE TEST`
+- [x] GitHub Actions auf denselben kanonischen Pfad umstellen
+- [ ] lokaler Lauf liefert `READY FOR AZURE TEST`
 
 ## P1 – Core
 
@@ -480,7 +598,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [x] Tenant-/Subscription-Auswahl
 - [x] RG-Scope
 - [x] Output / Logging / Manifest-Grundstruktur
-- [ ] Exit Codes vollständig
+- [ ] Exit Codes vollständig im Collector harmonisieren
 - [ ] Read-only-Status vollständig in Manifest integrieren
 
 ## P2 – Basisinventar
@@ -537,11 +655,11 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 - [ ] Beispiel-Export
 - [ ] Troubleshooting
 - [ ] Release ZIP
-- [ ] vollständige finale Read-only-Verifikation
+- [ ] vollständige finale Read-only-/Pre-Azure-Verifikation
 
 ---
 
-# 15. Entwicklungsregeln
+# 16. Entwicklungsregeln
 
 1. Keine kundenspezifischen Sonderfälle im Core.
 2. Keine stillen Annahmen.
@@ -553,17 +671,18 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden.
 8. Keine Self-Elevation.
 9. PowerShell 7 wird nicht automatisch installiert.
 10. Keine automatische PowerShell-Repository-Mutation.
-11. Architektur-/Scope-Änderungen werden zuerst in diesem Dokument festgelegt.
+11. Vor realen Azure-Läufen muss der aktuelle Stand `READY FOR AZURE TEST` erreichen.
+12. Architektur-/Scope-Änderungen werden zuerst in diesem Dokument festgelegt.
 
 ---
 
-# 16. Definition of Done Collector-Modul
+# 17. Definition of Done Collector-Modul
 
-Ein Modul gilt erst als fertig, wenn es kundengenerisch ist, Scope-Filter respektiert, Azure-Aufrufe read-only verifiziert sind, Fehler/Berechtigungen transparent behandelt werden, keine Secrets exportiert werden, Daten stabil sind, Tests vorhanden sind und die abschließende Read-only-Verifikation erfolgreich ist.
+Ein Modul gilt erst als fertig, wenn es kundengenerisch ist, Scope-Filter respektiert, Azure-Aufrufe read-only verifiziert sind, Fehler/Berechtigungen transparent behandelt werden, keine Secrets exportiert werden, Daten stabil sind, Tests vorhanden sind und die abschließende Pre-Azure-Validierung erfolgreich ist.
 
 ---
 
-# 17. Definition of Done Version 1.0
+# 18. Definition of Done Version 1.0
 
 Version 1.0 erfordert insbesondere:
 
@@ -576,18 +695,20 @@ Version 1.0 erfordert insbesondere:
 7. Secret Filtering und Berechtigungsfehler getestet,
 8. realistischer Kundenexport erfolgreich,
 9. KI-Dokumentation auf Exportbasis möglich,
-10. finale vollständige Verifikation liefert `READ-ONLY VERIFIED`.
+10. finale vollständige Read-only-Verifikation liefert `READ-ONLY VERIFIED`,
+11. finale Pre-Azure-/Release-Validierung liefert `READY FOR AZURE TEST`.
 
-Ohne Punkt 10 gibt es keinen ausführbaren Release.
+Ohne Punkte 10 und 11 gibt es keinen ausführbaren Release.
 
 ---
 
-# 18. Aktuelle Priorität
+# 19. Aktuelle Priorität
 
 ```text
 P0   Projektgrundlage
 P0a  Read-only Verification Gate
 P0b  Bootstrap / Dependency Handling
+P0c  Pre-Azure Validation
 P1   Core / Auth / Tenant / Subscription / Scope
 P2   Basisinventar
 P3   Netzwerk
@@ -601,11 +722,11 @@ P10  Tests / Härtung
 P11  Release 1.0
 ```
 
-**Vor dem ersten realen Azure-Test sind jetzt nur noch die lokalen PowerShell-Ausführungen des Gates und der Pester-Suite offen.**
+**Vor dem ersten realen Azure-Test ist jetzt ausschließlich der lokale erfolgreiche Lauf von `Tools/Invoke-PreAzureValidation.ps1` mit `Status: READY FOR AZURE TEST` offen.**
 
 ---
 
-# 19. Offene Architekturentscheidungen
+# 20. Offene Architekturentscheidungen
 
 - exakte Mindest-/Pinning-Versionen der Az-Module,
 - ZIP-Default,
@@ -618,7 +739,7 @@ P11  Release 1.0
 
 ---
 
-# 20. Leitentscheidung
+# 21. Leitentscheidung
 
 Der AzureInfrastructureCollector ist kein einmaliges Kundenskript, sondern ein wiederverwendbares, tenantfähiges und kundengenerisches **Read-only Inventarisierungswerkzeug**.
 
@@ -634,4 +755,4 @@ KI interpretiert und formuliert
 Dokumente und Diagramme präsentieren das Ergebnis
 ```
 
-**Ohne unmittelbar zuvor erfolgreich abgeschlossene Read-only-Verifikation darf kein realer Azure-Lauf freigegeben werden.**
+**Ohne unmittelbar zuvor erfolgreich abgeschlossene Pre-Azure-Validierung mit `READ-ONLY VERIFIED` und `READY FOR AZURE TEST` darf kein realer Azure-Lauf freigegeben werden.**
