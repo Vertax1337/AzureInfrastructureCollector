@@ -88,7 +88,7 @@ function Test-SetAzContextScope {
                 return $false
             }
 
-            $scopeText = $elements[$index + 1].Extent.Text.Trim("'\"")
+            $scopeText = $elements[$index + 1].Extent.Text.Trim([char[]]@(39, 34))
             return $scopeText -ieq 'Process'
         }
     }
@@ -128,7 +128,7 @@ function Test-CollectorReadOnlyCompliance {
         foreach ($pattern in $script:BlockedSourcePatterns) {
             if ($source -match $pattern) {
                 $relativePath = [IO.Path]::GetRelativePath($root, $file.FullName)
-                $violations.Add((New-ReadOnlyViolation -File $relativePath -Code 'DIRECT_AZURE_HTTP_OR_SDK' -Message "Direct Azure/HTTP SDK access matched a blocked pattern. Direct API access is fail-closed until explicitly reviewed."))
+                $violations.Add((New-ReadOnlyViolation -File $relativePath -Code 'DIRECT_AZURE_HTTP_OR_SDK' -Message 'Direct Azure/HTTP SDK access matched a blocked pattern. Direct API access is fail-closed until explicitly reviewed.'))
             }
         }
 
