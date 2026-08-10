@@ -10,27 +10,14 @@ permissions:
   contents: read
 
 jobs:
-  read-only-verification:
-    name: Verify read-only compliance
+  pre-azure-validation:
+    name: Pre-Azure validation
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run mandatory read-only verification
+      - name: Run canonical pre-Azure validation
         shell: pwsh
-        run: ./Tools/Test-ReadOnlyCompliance.ps1
-
-      - name: Install Pester
-        shell: pwsh
-        run: |
-          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
-
-      - name: Run Pester tests
-        shell: pwsh
-        run: |
-          $result = Invoke-Pester ./Tests -PassThru
-          if ($result.FailedCount -gt 0) {
-              throw "Pester reported $($result.FailedCount) failed test(s)."
-          }
+        run: ./Tools/Invoke-PreAzureValidation.ps1
