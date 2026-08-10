@@ -5,7 +5,7 @@
     "schemaVersion": "1.0"
   },
   "requirements": {
-    "minimumPowerShellVersion": "7.2.0",
+    "minimumPowerShellVersion": "7.6.0",
     "requiredModules": [
       "Az.Accounts",
       "Az.ResourceGraph"
