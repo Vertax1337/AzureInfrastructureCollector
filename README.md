@@ -191,7 +191,7 @@ Explicit tenant/subscription:
     -SubscriptionId 'yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy'
 ```
 
-Multiple subscriptions are supported via a string array. Resource-group filtering is available with `-ResourceGroup`.
+Multiple subscriptions are supported via a string array. Resource-group filtering is available with `-ResourceGroup`. Without `-ResourceGroup`, all discovered Resource Groups in the selected subscription scope are collected automatically.
 
 Non-interactive mode requires an existing Azure authentication context and explicit scope parameters:
 
@@ -220,9 +220,23 @@ Output/
 
 `Output/` is ignored by Git because exports can contain customer infrastructure information.
 
-## Secret handling
+## Export hardening and secret handling
 
-The Core MVP exports only explicitly selected inventory fields. Full resource `properties` blocks are not exported. Sensitive-looking tag/property names such as secrets, passwords, tokens, credentials, access keys and client secrets are additionally redacted.
+The export pipeline applies a dedicated `Collector.ExportSecurity` layer immediately before data is written. This layer is intended to be reused by later Network, Compute, AVD and other detail modules.
+
+The current protections are:
+
+- sensitive property/tag names are redacted recursively,
+- strong sensitive **value** patterns are also redacted even when stored under an innocent-looking property name,
+- covered value patterns include signed-URL/SAS signatures, account keys/shared-access-signature connection strings, private-key blocks, JWT-shaped tokens and embedded password/client-secret/API-key/access-key/SAS-token assignments,
+- ordinary values and normal HTTPS URLs remain unchanged,
+- Resource Group references in `resources.json` are canonicalized per subscription against the names returned in `resourceGroups.json`,
+- `readOnlyVerification.json` does not export the local `repositoryRoot`,
+- `manifest.json` does not export the executing Azure account/UPN.
+
+Tenant IDs, Subscription IDs and Azure Resource IDs remain in the export because they are required for deterministic correlation and future relationship generation.
+
+The Core MVP exports only explicitly selected inventory fields. Full resource `properties` blocks are not exported.
 
 ## Current scope of 0.1.0
 
@@ -250,10 +264,16 @@ Implemented:
 - paginated Azure Resource Graph collection
 - generic resource/resource-group inventory
 - normalized JSON export
+- canonical Resource Group references
+- export metadata minimization
+- property-name and value-based secret redaction
 - verification report, manifest, summary and logging
-- defense-in-depth secret redaction
 
-Planned next:
+Pre-Network validation remaining:
+
+- run one additional real collector export on the hardened build and verify the generated JSON
+
+Planned next after that validation:
 
 - Network detail module
 - Compute detail module
