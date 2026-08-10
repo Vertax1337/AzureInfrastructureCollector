@@ -24,9 +24,9 @@ Describe 'Protect-CollectorExportValue' {
         $result.Environment | Should -Be 'Production'
     }
 
-    It 'redacts a SAS signature even under an innocent property name' {
+    It 'redacts a signed URL value even under an innocent property name' {
         $result = Protect-CollectorExportValue `
-            -Value ([ordered]@{ Comment = 'https://example.blob.core.windows.net/container/file?sv=2026-01-01&sig=TopSecretSignature&se=2026-12-31' }) `
+            -Value ([ordered]@{ Comment = 'https://files.example.test/container/file?sv=2026-01-01&sig=TopSecretSignature&se=2026-12-31' }) `
             -SensitivePropertyPattern $propertyPattern `
             -SensitiveValuePatterns $valuePatterns
 
@@ -35,7 +35,7 @@ Describe 'Protect-CollectorExportValue' {
 
     It 'redacts a storage account key in a connection string value' {
         $result = Protect-CollectorExportValue `
-            -Value ([ordered]@{ Note = 'DefaultEndpointsProtocol=https;AccountName=demo;AccountKey=abc123;EndpointSuffix=core.windows.net' }) `
+            -Value ([ordered]@{ Note = 'DefaultEndpointsProtocol=https;AccountName=demo;AccountKey=abc123;EndpointSuffix=example.test' }) `
             -SensitivePropertyPattern $propertyPattern `
             -SensitiveValuePatterns $valuePatterns
 
@@ -43,7 +43,7 @@ Describe 'Protect-CollectorExportValue' {
     }
 
     It 'does not redact an ordinary HTTPS URL' {
-        $url = 'https://management.azure.com/subscriptions/example/resourceGroups/rg'
+        $url = 'https://docs.example.test/infrastructure/resource-groups'
         $result = Protect-CollectorExportValue `
             -Value ([ordered]@{ Documentation = $url }) `
             -SensitivePropertyPattern $propertyPattern `
