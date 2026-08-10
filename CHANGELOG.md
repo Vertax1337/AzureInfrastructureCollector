@@ -49,13 +49,14 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - value-based export redaction for signed URL/SAS signatures, account keys/shared-access-signature connection strings, private-key blocks, JWT-shaped tokens and embedded credential assignments
 - subscription-aware canonicalization of Resource Group references in resource inventory
 - public export projection for read-only verification and manifest metadata minimization
-- seven dedicated Pester tests covering export hardening, canonical Resource Group names and metadata minimization
+- eight dedicated Pester tests covering export hardening, canonical Resource Group names, metadata minimization and JSON array type stability
 - tenant-specific timestamped export structure
 - `manifest.json`, `summary.json` and collector log
 - initial Pester unit tests
 
 ### Fixed
 
+- export hardening now preserves empty arrays as `[]` instead of collapsing them to `null`; this keeps fields such as `errors`, `violations` and `resourceGroupFilter` schema-stable
 - `resources.json` now uses the canonical Resource Group spelling from `resourceGroups.json` for the same subscription instead of preserving inconsistent Resource Graph casing
 - `readOnlyVerification.json` no longer exposes the local collector repository path (`repositoryRoot`)
 - `manifest.json` no longer exports the executing Azure account/UPN
