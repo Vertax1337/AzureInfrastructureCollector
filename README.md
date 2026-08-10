@@ -4,6 +4,8 @@ Read-only PowerShell collector for repeatable, customer-neutral Azure infrastruc
 
 > Current milestone: **Core MVP 0.1.0**
 
+> **Supreme safety rule:** No collector build is approved for execution unless the final verification result is `READ-ONLY VERIFIED`.
+
 The collector converts the actual Azure state into a normalized JSON export. Documentation generation, AI analysis, diagrams, DOCX/PDF output and specialized service modules are intentionally separate follow-up stages.
 
 ## Core principles
@@ -13,11 +15,55 @@ The collector converts the actual Azure state into a normalized JSON export. Doc
 - one or multiple subscriptions per run
 - Azure Resource Graph first
 - read-only by design
+- fail-closed read-only verification before Azure access
 - no intentional export of secrets or credentials
 - deterministic, normalized JSON output
 - best-effort collection with errors recorded in the manifest and log
 
-The authoritative project scope and architecture are defined in [`Umsetzungsplan.md`](./Umsetzungsplan.md).
+The authoritative project scope, architecture and supreme read-only rule are defined in [`Umsetzungsplan.md`](./Umsetzungsplan.md).
+
+## Mandatory read-only verification
+
+Before the first Azure test and before every later execution approval, run:
+
+```powershell
+./Tools/Test-ReadOnlyCompliance.ps1
+```
+
+The only successful approval state is:
+
+```text
+READ-ONLY VERIFICATION
+Status: READ-ONLY VERIFIED
+Azure resource mutations: NONE DETECTED
+Azure data mutations: NONE DETECTED
+Control-plane write operations: NONE DETECTED
+Data-plane write operations: NONE DETECTED
+```
+
+The collector also executes the same gate automatically at the very beginning of `Collect-AzureDocumentation.ps1`, before authentication or Resource Graph collection. A failed or ambiguous verification blocks execution.
+
+The MVP gate is deliberately strict:
+
+- Azure PowerShell uses an explicit allowlist.
+- Any new `*-Az*` command is blocked until separately reviewed and allowlisted.
+- `Set-AzContext` is allowed only with explicit `-Scope Process`.
+- direct REST/web calls are blocked in the MVP until explicitly reviewed.
+- Azure CLI execution is blocked.
+- dynamic command execution is blocked.
+- PowerShell parse errors block approval.
+- suspicious direct Azure HTTP/SDK usage blocks approval.
+
+The currently approved Azure commands are limited to:
+
+- `Connect-AzAccount`
+- `Get-AzContext`
+- `Get-AzTenant`
+- `Get-AzSubscription`
+- `Set-AzContext -Scope Process`
+- `Search-AzGraph`
+
+These operations are used only for authentication/local context selection and read-only inventory queries. Local writes are limited to collector output, logs and local processing.
 
 ## Requirements
 
@@ -33,7 +79,21 @@ Install-Module Az.Accounts -Scope CurrentUser
 Install-Module Az.ResourceGraph -Scope CurrentUser
 ```
 
+For tests:
+
+```powershell
+Install-Module Pester -Scope CurrentUser
+```
+
 ## Usage
+
+### Safety check first
+
+```powershell
+./Tools/Test-ReadOnlyCompliance.ps1
+```
+
+Do not continue unless the result is `READ-ONLY VERIFIED`.
 
 ### Interactive
 
@@ -41,7 +101,7 @@ Install-Module Az.ResourceGraph -Scope CurrentUser
 ./Collect-AzureDocumentation.ps1
 ```
 
-The collector reuses an existing Azure context where possible. If no context exists, an interactive `Connect-AzAccount` login is started. You can then select the tenant and one or more subscriptions.
+The collector reruns the mandatory read-only gate automatically. It then reuses an existing Azure context where possible. If no context exists, an interactive `Connect-AzAccount` login is started. You can then select the tenant and one or more subscriptions.
 
 An optional resource-group filter can be entered after resource groups have been discovered.
 
@@ -94,6 +154,7 @@ A run creates its own tenant-specific timestamped directory:
 ```text
 Output/
 └── TenantName_2026-08-10_084800/
+    ├── readOnlyVerification.json
     ├── manifest.json
     ├── summary.json
     ├── Inventory/
@@ -102,6 +163,10 @@ Output/
     └── Logs/
         └── collector.log
 ```
+
+### `readOnlyVerification.json`
+
+Records the mandatory verification result that allowed the collector run to proceed, including the scanned-file count, approved Azure commands observed and detected mutation status.
 
 ### `manifest.json`
 
@@ -131,18 +196,21 @@ This is a defense-in-depth measure and does not replace correct Azure RBAC and d
 
 ## Tests
 
-Unit tests use Pester:
+Run all Pester tests:
 
 ```powershell
-Invoke-Pester ./Tests/Unit
+Invoke-Pester ./Tests
 ```
 
-The first tests cover safe export names, recursive sensitive-value redaction and the stable normalized core resource shape.
+The test suite covers core normalization/security behavior plus the read-only guard. Guard tests explicitly verify that unapproved Azure commands, dynamic execution, direct REST execution and unsafe `Set-AzContext` usage are blocked.
 
 ## Current scope of 0.1.0
 
 Implemented:
 
+- mandatory fail-closed read-only verification gate
+- standalone read-only verification command
+- automatic read-only verification before collector Azure access
 - prerequisite validation
 - existing-context reuse / interactive Azure login
 - tenant discovery and selection
@@ -153,6 +221,7 @@ Implemented:
 - generic resource inventory
 - resource-group inventory
 - normalized JSON export
+- `readOnlyVerification.json`
 - `manifest.json`
 - `summary.json`
 - logging
