@@ -11,6 +11,9 @@
       "Az.ResourceGraph"
     ]
   },
+  "validation": {
+    "minimumPesterVersion": "5.5.0"
+  },
   "resourceGraph": {
     "pageSize": 1000
   },
