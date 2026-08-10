@@ -77,6 +77,33 @@ function ConvertTo-CollectorNetworkIdArray {
     return ,@($ids | Sort-Object -Unique)
 }
 
+function Get-CollectorNetworkChildId {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ParentId,
+
+        [Parameter(Mandatory)]
+        [string]$CollectionName,
+
+        $Child,
+
+        [int]$Index = 0
+    )
+
+    $id = [string](Get-CollectorNetworkProperty -InputObject $Child -Name 'id')
+    if (-not [string]::IsNullOrWhiteSpace($id)) {
+        return $id
+    }
+
+    $name = [string](Get-CollectorNetworkProperty -InputObject $Child -Name 'name')
+    if ([string]::IsNullOrWhiteSpace($name)) {
+        $name = 'item-{0}' -f $Index
+    }
+
+    return '{0}/{1}/{2}' -f $ParentId, $CollectionName, $name
+}
+
 function New-CollectorNetworkRelationship {
     [CmdletBinding()]
     param(
@@ -123,6 +150,38 @@ function ConvertTo-CollectorNetworkInventory {
     $localNetworkGateways = [System.Collections.Generic.List[object]]::new()
     $connections = [System.Collections.Generic.List[object]]::new()
     $networkWatchers = [System.Collections.Generic.List[object]]::new()
+
+    $privateEndpoints = [System.Collections.Generic.List[object]]::new()
+    $privateLinkConnections = [System.Collections.Generic.List[object]]::new()
+    $privateDnsZones = [System.Collections.Generic.List[object]]::new()
+    $privateDnsVirtualNetworkLinks = [System.Collections.Generic.List[object]]::new()
+    $natGateways = [System.Collections.Generic.List[object]]::new()
+
+    $loadBalancers = [System.Collections.Generic.List[object]]::new()
+    $loadBalancerFrontendIpConfigurations = [System.Collections.Generic.List[object]]::new()
+    $loadBalancerBackendPools = [System.Collections.Generic.List[object]]::new()
+    $loadBalancerBackendAddresses = [System.Collections.Generic.List[object]]::new()
+    $loadBalancerRules = [System.Collections.Generic.List[object]]::new()
+    $loadBalancerProbes = [System.Collections.Generic.List[object]]::new()
+    $loadBalancerOutboundRules = [System.Collections.Generic.List[object]]::new()
+
+    $applicationGateways = [System.Collections.Generic.List[object]]::new()
+    $applicationGatewayIpConfigurations = [System.Collections.Generic.List[object]]::new()
+    $applicationGatewayFrontendIpConfigurations = [System.Collections.Generic.List[object]]::new()
+    $applicationGatewayFrontendPorts = [System.Collections.Generic.List[object]]::new()
+    $applicationGatewayBackendPools = [System.Collections.Generic.List[object]]::new()
+    $applicationGatewayBackendAddresses = [System.Collections.Generic.List[object]]::new()
+    $applicationGatewayBackendHttpSettings = [System.Collections.Generic.List[object]]::new()
+    $applicationGatewayHttpListeners = [System.Collections.Generic.List[object]]::new()
+    $applicationGatewayRequestRoutingRules = [System.Collections.Generic.List[object]]::new()
+    $applicationGatewayProbes = [System.Collections.Generic.List[object]]::new()
+    $applicationGatewayUrlPathMaps = [System.Collections.Generic.List[object]]::new()
+    $applicationGatewayPathRules = [System.Collections.Generic.List[object]]::new()
+
+    $azureFirewalls = [System.Collections.Generic.List[object]]::new()
+    $azureFirewallIpConfigurations = [System.Collections.Generic.List[object]]::new()
+    $firewallPolicies = [System.Collections.Generic.List[object]]::new()
+
     $relationships = [System.Collections.Generic.List[object]]::new()
 
     foreach ($row in @($Rows)) {
@@ -133,6 +192,7 @@ function ConvertTo-CollectorNetworkInventory {
         $resourceGroup = [string](Get-CollectorNetworkProperty -InputObject $row -Name 'resourceGroup')
         $location = [string](Get-CollectorNetworkProperty -InputObject $row -Name 'location')
         $tags = Get-CollectorNetworkProperty -InputObject $row -Name 'tags'
+        $zones = ConvertTo-CollectorNetworkStringArray (Get-CollectorNetworkProperty -InputObject $row -Name 'zones')
 
         switch ($type) {
             'microsoft.network/virtualnetworks' {
@@ -524,6 +584,748 @@ function ConvertTo-CollectorNetworkInventory {
                     tags           = $tags
                 })
             }
+
+            'microsoft.network/privateendpoints' {
+                $subnetId = [string](Get-CollectorNetworkProperty $row 'privateEndpointSubnetId')
+                $privateEndpoints.Add([pscustomobject][ordered]@{
+                    id             = $id
+                    name           = $name
+                    subscriptionId = $subscriptionId
+                    resourceGroup  = $resourceGroup
+                    location       = $location
+                    subnetId       = $subnetId
+                    tags           = $tags
+                })
+
+                if (-not [string]::IsNullOrWhiteSpace($subnetId)) {
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'AttachedToSubnet' -TargetId $subnetId
+                    if ($relationship) { $relationships.Add($relationship) }
+                }
+
+                foreach ($connectionSet in @(
+                    [pscustomobject]@{ Mode = 'Automatic'; Items = @(Get-CollectorNetworkProperty $row 'privateEndpointConnections') },
+                    [pscustomobject]@{ Mode = 'Manual'; Items = @(Get-CollectorNetworkProperty $row 'privateEndpointManualConnections') }
+                )) {
+                    $index = 0
+                    foreach ($connection in @($connectionSet.Items)) {
+                        $index++
+                        if ($null -eq $connection) { continue }
+                        $connectionProperties = Get-CollectorNetworkProperty $connection 'properties'
+                        $connectionState = Get-CollectorNetworkProperty $connectionProperties 'privateLinkServiceConnectionState'
+                        $connectionId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'privateLinkServiceConnections' -Child $connection -Index $index
+                        $connectionName = [string](Get-CollectorNetworkProperty $connection 'name')
+                        $targetResourceId = [string](Get-CollectorNetworkProperty $connectionProperties 'privateLinkServiceId')
+
+                        $privateLinkConnections.Add([pscustomobject][ordered]@{
+                            id                    = $connectionId
+                            name                  = $connectionName
+                            privateEndpointId     = $id
+                            connectionMode        = [string]$connectionSet.Mode
+                            privateLinkServiceId  = $targetResourceId
+                            groupIds              = ConvertTo-CollectorNetworkStringArray (Get-CollectorNetworkProperty $connectionProperties 'groupIds')
+                            status                = [string](Get-CollectorNetworkProperty $connectionState 'status')
+                            actionsRequired       = [string](Get-CollectorNetworkProperty $connectionState 'actionsRequired')
+                        })
+
+                        $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsPrivateLinkConnection' -TargetId $connectionId
+                        if ($relationship) { $relationships.Add($relationship) }
+                        if (-not [string]::IsNullOrWhiteSpace($targetResourceId)) {
+                            $relationship = New-CollectorNetworkRelationship -SourceId $connectionId -Relationship 'ConnectsToResource' -TargetId $targetResourceId
+                            if ($relationship) { $relationships.Add($relationship) }
+                            $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ConnectsToResource' -TargetId $targetResourceId
+                            if ($relationship) { $relationships.Add($relationship) }
+                        }
+                    }
+                }
+            }
+
+            'microsoft.network/privatednszones' {
+                $privateDnsZones.Add([pscustomobject][ordered]@{
+                    id             = $id
+                    name           = $name
+                    subscriptionId = $subscriptionId
+                    resourceGroup  = $resourceGroup
+                    location       = $location
+                    tags           = $tags
+                })
+            }
+
+            'microsoft.network/privatednszones/virtualnetworklinks' {
+                $zoneId = $id -replace '(?i)/virtualNetworkLinks/[^/]+$',''
+                $linkName = $name
+                if ($linkName -match '/') {
+                    $linkName = ($linkName -split '/')[-1]
+                }
+                $virtualNetworkId = [string](Get-CollectorNetworkProperty $row 'privateDnsLinkVirtualNetworkId')
+
+                $privateDnsVirtualNetworkLinks.Add([pscustomobject][ordered]@{
+                    id                  = $id
+                    name                = $linkName
+                    privateDnsZoneId    = $zoneId
+                    subscriptionId      = $subscriptionId
+                    resourceGroup       = $resourceGroup
+                    location            = $location
+                    virtualNetworkId    = $virtualNetworkId
+                    registrationEnabled = Get-CollectorNetworkProperty $row 'privateDnsLinkRegistrationEnabled'
+                    resolutionPolicy    = [string](Get-CollectorNetworkProperty $row 'privateDnsLinkResolutionPolicy')
+                    tags                = $tags
+                })
+
+                if (-not [string]::IsNullOrWhiteSpace($zoneId)) {
+                    $relationship = New-CollectorNetworkRelationship -SourceId $zoneId -Relationship 'ContainsVirtualNetworkLink' -TargetId $id
+                    if ($relationship) { $relationships.Add($relationship) }
+                }
+                if (-not [string]::IsNullOrWhiteSpace($virtualNetworkId)) {
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'LinkedToVNet' -TargetId $virtualNetworkId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    if (-not [string]::IsNullOrWhiteSpace($zoneId)) {
+                        $relationship = New-CollectorNetworkRelationship -SourceId $zoneId -Relationship 'LinkedToVNet' -TargetId $virtualNetworkId
+                        if ($relationship) { $relationships.Add($relationship) }
+                    }
+                }
+            }
+
+            'microsoft.network/natgateways' {
+                $publicIpIds = ConvertTo-CollectorNetworkIdArray (Get-CollectorNetworkProperty $row 'natGatewayPublicIpAddresses')
+                $publicIpPrefixIds = ConvertTo-CollectorNetworkIdArray (Get-CollectorNetworkProperty $row 'natGatewayPublicIpPrefixes')
+                $natGateways.Add([pscustomobject][ordered]@{
+                    id                   = $id
+                    name                 = $name
+                    subscriptionId       = $subscriptionId
+                    resourceGroup        = $resourceGroup
+                    location             = $location
+                    skuName              = [string](Get-CollectorNetworkProperty $row 'skuName')
+                    zones                = $zones
+                    idleTimeoutInMinutes = Get-CollectorNetworkProperty $row 'natGatewayIdleTimeoutMinutes'
+                    publicIpAddressIds   = $publicIpIds
+                    publicIpPrefixIds    = $publicIpPrefixIds
+                    tags                 = $tags
+                })
+
+                foreach ($publicIpId in @($publicIpIds)) {
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'UsesPublicIp' -TargetId $publicIpId
+                    if ($relationship) { $relationships.Add($relationship) }
+                }
+                foreach ($publicIpPrefixId in @($publicIpPrefixIds)) {
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'UsesPublicIpPrefix' -TargetId $publicIpPrefixId
+                    if ($relationship) { $relationships.Add($relationship) }
+                }
+            }
+
+            'microsoft.network/loadbalancers' {
+                $loadBalancers.Add([pscustomobject][ordered]@{
+                    id             = $id
+                    name           = $name
+                    subscriptionId = $subscriptionId
+                    resourceGroup  = $resourceGroup
+                    location       = $location
+                    skuName        = [string](Get-CollectorNetworkProperty $row 'skuName')
+                    skuTier        = [string](Get-CollectorNetworkProperty $row 'skuTier')
+                    scope          = [string](Get-CollectorNetworkProperty $row 'loadBalancerScope')
+                    tags           = $tags
+                })
+
+                $index = 0
+                foreach ($frontend in @(Get-CollectorNetworkProperty $row 'loadBalancerFrontendIpConfigurations')) {
+                    $index++
+                    $frontendProperties = Get-CollectorNetworkProperty $frontend 'properties'
+                    $frontendId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'frontendIPConfigurations' -Child $frontend -Index $index
+                    $frontendName = [string](Get-CollectorNetworkProperty $frontend 'name')
+                    $subnetId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $frontendProperties 'subnet') 'id')
+                    $publicIpId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $frontendProperties 'publicIPAddress') 'id')
+                    $publicIpPrefixId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $frontendProperties 'publicIPPrefix') 'id')
+
+                    $loadBalancerFrontendIpConfigurations.Add([pscustomobject][ordered]@{
+                        id                        = $frontendId
+                        name                      = $frontendName
+                        loadBalancerId            = $id
+                        privateIpAddress          = [string](Get-CollectorNetworkProperty $frontendProperties 'privateIPAddress')
+                        privateIpAllocationMethod = [string](Get-CollectorNetworkProperty $frontendProperties 'privateIPAllocationMethod')
+                        privateIpAddressVersion   = [string](Get-CollectorNetworkProperty $frontendProperties 'privateIPAddressVersion')
+                        subnetId                  = $subnetId
+                        publicIpAddressId         = $publicIpId
+                        publicIpPrefixId          = $publicIpPrefixId
+                        zones                     = ConvertTo-CollectorNetworkStringArray (Get-CollectorNetworkProperty $frontend 'zones')
+                    })
+
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsLoadBalancerFrontend' -TargetId $frontendId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    foreach ($target in @(
+                        [pscustomobject]@{ Id = $subnetId; Relation = 'AttachedToSubnet' },
+                        [pscustomobject]@{ Id = $publicIpId; Relation = 'UsesPublicIp' },
+                        [pscustomobject]@{ Id = $publicIpPrefixId; Relation = 'UsesPublicIpPrefix' }
+                    )) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$target.Id)) {
+                            $relationship = New-CollectorNetworkRelationship -SourceId $frontendId -Relationship $target.Relation -TargetId ([string]$target.Id)
+                            if ($relationship) { $relationships.Add($relationship) }
+                        }
+                    }
+                }
+
+                $poolIndex = 0
+                foreach ($pool in @(Get-CollectorNetworkProperty $row 'loadBalancerBackendAddressPools')) {
+                    $poolIndex++
+                    $poolProperties = Get-CollectorNetworkProperty $pool 'properties'
+                    $poolId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'backendAddressPools' -Child $pool -Index $poolIndex
+                    $poolName = [string](Get-CollectorNetworkProperty $pool 'name')
+                    $virtualNetworkId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $poolProperties 'virtualNetwork') 'id')
+                    $backendAddresses = @(Get-CollectorNetworkProperty $poolProperties 'loadBalancerBackendAddresses')
+
+                    $loadBalancerBackendPools.Add([pscustomobject][ordered]@{
+                        id                     = $poolId
+                        name                   = $poolName
+                        loadBalancerId         = $id
+                        virtualNetworkId       = $virtualNetworkId
+                        syncMode               = [string](Get-CollectorNetworkProperty $poolProperties 'syncMode')
+                        backendAddressCount    = $backendAddresses.Count
+                    })
+
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsLoadBalancerBackendPool' -TargetId $poolId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    if (-not [string]::IsNullOrWhiteSpace($virtualNetworkId)) {
+                        $relationship = New-CollectorNetworkRelationship -SourceId $poolId -Relationship 'AttachedToVNet' -TargetId $virtualNetworkId
+                        if ($relationship) { $relationships.Add($relationship) }
+                    }
+
+                    $backendIndex = 0
+                    foreach ($backend in $backendAddresses) {
+                        $backendIndex++
+                        $backendProperties = Get-CollectorNetworkProperty $backend 'properties'
+                        $backendId = Get-CollectorNetworkChildId -ParentId $poolId -CollectionName 'backendAddresses' -Child $backend -Index $backendIndex
+                        $backendName = [string](Get-CollectorNetworkProperty $backend 'name')
+                        $backendSubnetId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $backendProperties 'subnet') 'id')
+                        $backendVnetId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $backendProperties 'virtualNetwork') 'id')
+                        $backendFrontendId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $backendProperties 'loadBalancerFrontendIPConfiguration') 'id')
+
+                        $loadBalancerBackendAddresses.Add([pscustomobject][ordered]@{
+                            id                            = $backendId
+                            name                          = $backendName
+                            backendPoolId                 = $poolId
+                            ipAddress                     = [string](Get-CollectorNetworkProperty $backendProperties 'ipAddress')
+                            adminState                    = [string](Get-CollectorNetworkProperty $backendProperties 'adminState')
+                            subnetId                      = $backendSubnetId
+                            virtualNetworkId              = $backendVnetId
+                            frontendIpConfigurationId     = $backendFrontendId
+                        })
+
+                        $relationship = New-CollectorNetworkRelationship -SourceId $poolId -Relationship 'ContainsBackendAddress' -TargetId $backendId
+                        if ($relationship) { $relationships.Add($relationship) }
+                        foreach ($target in @(
+                            [pscustomobject]@{ Id = $backendSubnetId; Relation = 'AttachedToSubnet' },
+                            [pscustomobject]@{ Id = $backendVnetId; Relation = 'AttachedToVNet' },
+                            [pscustomobject]@{ Id = $backendFrontendId; Relation = 'UsesLoadBalancerFrontend' }
+                        )) {
+                            if (-not [string]::IsNullOrWhiteSpace([string]$target.Id)) {
+                                $relationship = New-CollectorNetworkRelationship -SourceId $backendId -Relationship $target.Relation -TargetId ([string]$target.Id)
+                                if ($relationship) { $relationships.Add($relationship) }
+                            }
+                        }
+                    }
+                }
+
+                $probeIndex = 0
+                foreach ($probe in @(Get-CollectorNetworkProperty $row 'loadBalancerProbes')) {
+                    $probeIndex++
+                    $probeProperties = Get-CollectorNetworkProperty $probe 'properties'
+                    $probeId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'probes' -Child $probe -Index $probeIndex
+                    $loadBalancerProbes.Add([pscustomobject][ordered]@{
+                        id                        = $probeId
+                        name                      = [string](Get-CollectorNetworkProperty $probe 'name')
+                        loadBalancerId            = $id
+                        protocol                  = [string](Get-CollectorNetworkProperty $probeProperties 'protocol')
+                        port                      = Get-CollectorNetworkProperty $probeProperties 'port'
+                        intervalInSeconds         = Get-CollectorNetworkProperty $probeProperties 'intervalInSeconds'
+                        numberOfProbes            = Get-CollectorNetworkProperty $probeProperties 'numberOfProbes'
+                        probeThreshold            = Get-CollectorNetworkProperty $probeProperties 'probeThreshold'
+                        requestPath               = [string](Get-CollectorNetworkProperty $probeProperties 'requestPath')
+                        noHealthyBackendsBehavior = [string](Get-CollectorNetworkProperty $probeProperties 'noHealthyBackendsBehavior')
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsLoadBalancerProbe' -TargetId $probeId
+                    if ($relationship) { $relationships.Add($relationship) }
+                }
+
+                $ruleIndex = 0
+                foreach ($rule in @(Get-CollectorNetworkProperty $row 'loadBalancerRules')) {
+                    $ruleIndex++
+                    $ruleProperties = Get-CollectorNetworkProperty $rule 'properties'
+                    $ruleId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'loadBalancingRules' -Child $rule -Index $ruleIndex
+                    $frontendId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $ruleProperties 'frontendIPConfiguration') 'id')
+                    $probeId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $ruleProperties 'probe') 'id')
+                    $backendPoolIds = @()
+                    $singleBackendPoolId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $ruleProperties 'backendAddressPool') 'id')
+                    if (-not [string]::IsNullOrWhiteSpace($singleBackendPoolId)) { $backendPoolIds += $singleBackendPoolId }
+                    $backendPoolIds += @(ConvertTo-CollectorNetworkIdArray (Get-CollectorNetworkProperty $ruleProperties 'backendAddressPools'))
+                    $backendPoolIds = @($backendPoolIds | Sort-Object -Unique)
+
+                    $loadBalancerRules.Add([pscustomobject][ordered]@{
+                        id                       = $ruleId
+                        name                     = [string](Get-CollectorNetworkProperty $rule 'name')
+                        loadBalancerId           = $id
+                        protocol                 = [string](Get-CollectorNetworkProperty $ruleProperties 'protocol')
+                        frontendPort             = Get-CollectorNetworkProperty $ruleProperties 'frontendPort'
+                        backendPort              = Get-CollectorNetworkProperty $ruleProperties 'backendPort'
+                        frontendIpConfigurationId = $frontendId
+                        backendAddressPoolIds    = $backendPoolIds
+                        probeId                  = $probeId
+                        loadDistribution         = [string](Get-CollectorNetworkProperty $ruleProperties 'loadDistribution')
+                        idleTimeoutInMinutes     = Get-CollectorNetworkProperty $ruleProperties 'idleTimeoutInMinutes'
+                        disableOutboundSnat      = Get-CollectorNetworkProperty $ruleProperties 'disableOutboundSnat'
+                        enableFloatingIp         = Get-CollectorNetworkProperty $ruleProperties 'enableFloatingIP'
+                        enableTcpReset           = Get-CollectorNetworkProperty $ruleProperties 'enableTcpReset'
+                    })
+
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsLoadBalancerRule' -TargetId $ruleId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    if (-not [string]::IsNullOrWhiteSpace($frontendId)) {
+                        $relationship = New-CollectorNetworkRelationship -SourceId $ruleId -Relationship 'UsesLoadBalancerFrontend' -TargetId $frontendId
+                        if ($relationship) { $relationships.Add($relationship) }
+                    }
+                    foreach ($backendPoolId in $backendPoolIds) {
+                        $relationship = New-CollectorNetworkRelationship -SourceId $ruleId -Relationship 'UsesLoadBalancerBackendPool' -TargetId $backendPoolId
+                        if ($relationship) { $relationships.Add($relationship) }
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($probeId)) {
+                        $relationship = New-CollectorNetworkRelationship -SourceId $ruleId -Relationship 'UsesLoadBalancerProbe' -TargetId $probeId
+                        if ($relationship) { $relationships.Add($relationship) }
+                    }
+                }
+
+                $outboundIndex = 0
+                foreach ($outboundRule in @(Get-CollectorNetworkProperty $row 'loadBalancerOutboundRules')) {
+                    $outboundIndex++
+                    $outboundProperties = Get-CollectorNetworkProperty $outboundRule 'properties'
+                    $outboundId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'outboundRules' -Child $outboundRule -Index $outboundIndex
+                    $backendPoolId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $outboundProperties 'backendAddressPool') 'id')
+                    $frontendIds = ConvertTo-CollectorNetworkIdArray (Get-CollectorNetworkProperty $outboundProperties 'frontendIPConfigurations')
+
+                    $loadBalancerOutboundRules.Add([pscustomobject][ordered]@{
+                        id                       = $outboundId
+                        name                     = [string](Get-CollectorNetworkProperty $outboundRule 'name')
+                        loadBalancerId           = $id
+                        protocol                 = [string](Get-CollectorNetworkProperty $outboundProperties 'protocol')
+                        backendAddressPoolId     = $backendPoolId
+                        frontendIpConfigurationIds = $frontendIds
+                        allocatedOutboundPorts   = Get-CollectorNetworkProperty $outboundProperties 'allocatedOutboundPorts'
+                        idleTimeoutInMinutes     = Get-CollectorNetworkProperty $outboundProperties 'idleTimeoutInMinutes'
+                        enableTcpReset           = Get-CollectorNetworkProperty $outboundProperties 'enableTcpReset'
+                    })
+
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsLoadBalancerOutboundRule' -TargetId $outboundId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    if (-not [string]::IsNullOrWhiteSpace($backendPoolId)) {
+                        $relationship = New-CollectorNetworkRelationship -SourceId $outboundId -Relationship 'UsesLoadBalancerBackendPool' -TargetId $backendPoolId
+                        if ($relationship) { $relationships.Add($relationship) }
+                    }
+                    foreach ($frontendId in @($frontendIds)) {
+                        $relationship = New-CollectorNetworkRelationship -SourceId $outboundId -Relationship 'UsesLoadBalancerFrontend' -TargetId $frontendId
+                        if ($relationship) { $relationships.Add($relationship) }
+                    }
+                }
+            }
+
+            'microsoft.network/applicationgateways' {
+                $firewallPolicyId = [string](Get-CollectorNetworkProperty $row 'applicationGatewayFirewallPolicyId')
+                $applicationGateways.Add([pscustomobject][ordered]@{
+                    id               = $id
+                    name             = $name
+                    subscriptionId   = $subscriptionId
+                    resourceGroup    = $resourceGroup
+                    location         = $location
+                    skuName          = [string](Get-CollectorNetworkProperty $row 'applicationGatewaySkuName')
+                    skuTier          = [string](Get-CollectorNetworkProperty $row 'applicationGatewaySkuTier')
+                    skuCapacity      = Get-CollectorNetworkProperty $row 'applicationGatewaySkuCapacity'
+                    autoscaleMinCapacity = Get-CollectorNetworkProperty $row 'applicationGatewayAutoscaleMinCapacity'
+                    autoscaleMaxCapacity = Get-CollectorNetworkProperty $row 'applicationGatewayAutoscaleMaxCapacity'
+                    enableHttp2      = Get-CollectorNetworkProperty $row 'applicationGatewayEnableHttp2'
+                    firewallPolicyId = $firewallPolicyId
+                    zones            = $zones
+                    tags             = $tags
+                })
+
+                if (-not [string]::IsNullOrWhiteSpace($firewallPolicyId)) {
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'UsesFirewallPolicy' -TargetId $firewallPolicyId
+                    if ($relationship) { $relationships.Add($relationship) }
+                }
+
+                $index = 0
+                foreach ($ipConfig in @(Get-CollectorNetworkProperty $row 'applicationGatewayIpConfigurations')) {
+                    $index++
+                    $properties = Get-CollectorNetworkProperty $ipConfig 'properties'
+                    $childId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'gatewayIPConfigurations' -Child $ipConfig -Index $index
+                    $subnetId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'subnet') 'id')
+                    $applicationGatewayIpConfigurations.Add([pscustomobject][ordered]@{
+                        id                   = $childId
+                        name                 = [string](Get-CollectorNetworkProperty $ipConfig 'name')
+                        applicationGatewayId = $id
+                        subnetId             = $subnetId
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsApplicationGatewayIpConfiguration' -TargetId $childId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    if (-not [string]::IsNullOrWhiteSpace($subnetId)) {
+                        $relationship = New-CollectorNetworkRelationship -SourceId $childId -Relationship 'AttachedToSubnet' -TargetId $subnetId
+                        if ($relationship) { $relationships.Add($relationship) }
+                    }
+                }
+
+                $index = 0
+                foreach ($frontend in @(Get-CollectorNetworkProperty $row 'applicationGatewayFrontendIpConfigurations')) {
+                    $index++
+                    $properties = Get-CollectorNetworkProperty $frontend 'properties'
+                    $childId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'frontendIPConfigurations' -Child $frontend -Index $index
+                    $subnetId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'subnet') 'id')
+                    $publicIpId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'publicIPAddress') 'id')
+                    $applicationGatewayFrontendIpConfigurations.Add([pscustomobject][ordered]@{
+                        id                        = $childId
+                        name                      = [string](Get-CollectorNetworkProperty $frontend 'name')
+                        applicationGatewayId      = $id
+                        privateIpAddress          = [string](Get-CollectorNetworkProperty $properties 'privateIPAddress')
+                        privateIpAllocationMethod = [string](Get-CollectorNetworkProperty $properties 'privateIPAllocationMethod')
+                        subnetId                  = $subnetId
+                        publicIpAddressId         = $publicIpId
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsApplicationGatewayFrontend' -TargetId $childId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    foreach ($target in @(
+                        [pscustomobject]@{ Id = $subnetId; Relation = 'AttachedToSubnet' },
+                        [pscustomobject]@{ Id = $publicIpId; Relation = 'UsesPublicIp' }
+                    )) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$target.Id)) {
+                            $relationship = New-CollectorNetworkRelationship -SourceId $childId -Relationship $target.Relation -TargetId ([string]$target.Id)
+                            if ($relationship) { $relationships.Add($relationship) }
+                        }
+                    }
+                }
+
+                $index = 0
+                foreach ($port in @(Get-CollectorNetworkProperty $row 'applicationGatewayFrontendPorts')) {
+                    $index++
+                    $properties = Get-CollectorNetworkProperty $port 'properties'
+                    $childId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'frontendPorts' -Child $port -Index $index
+                    $applicationGatewayFrontendPorts.Add([pscustomobject][ordered]@{
+                        id                   = $childId
+                        name                 = [string](Get-CollectorNetworkProperty $port 'name')
+                        applicationGatewayId = $id
+                        port                 = Get-CollectorNetworkProperty $properties 'port'
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsApplicationGatewayFrontendPort' -TargetId $childId
+                    if ($relationship) { $relationships.Add($relationship) }
+                }
+
+                $poolIndex = 0
+                foreach ($pool in @(Get-CollectorNetworkProperty $row 'applicationGatewayBackendAddressPools')) {
+                    $poolIndex++
+                    $properties = Get-CollectorNetworkProperty $pool 'properties'
+                    $poolId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'backendAddressPools' -Child $pool -Index $poolIndex
+                    $backendAddresses = @(Get-CollectorNetworkProperty $properties 'backendAddresses')
+                    $applicationGatewayBackendPools.Add([pscustomobject][ordered]@{
+                        id                   = $poolId
+                        name                 = [string](Get-CollectorNetworkProperty $pool 'name')
+                        applicationGatewayId = $id
+                        backendAddressCount  = $backendAddresses.Count
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsApplicationGatewayBackendPool' -TargetId $poolId
+                    if ($relationship) { $relationships.Add($relationship) }
+
+                    $backendIndex = 0
+                    foreach ($backendAddress in $backendAddresses) {
+                        $backendIndex++
+                        $backendId = '{0}/backendAddresses/item-{1}' -f $poolId, $backendIndex
+                        $applicationGatewayBackendAddresses.Add([pscustomobject][ordered]@{
+                            id            = $backendId
+                            backendPoolId = $poolId
+                            ipAddress     = [string](Get-CollectorNetworkProperty $backendAddress 'ipAddress')
+                            fqdn          = [string](Get-CollectorNetworkProperty $backendAddress 'fqdn')
+                        })
+                        $relationship = New-CollectorNetworkRelationship -SourceId $poolId -Relationship 'ContainsBackendAddress' -TargetId $backendId
+                        if ($relationship) { $relationships.Add($relationship) }
+                    }
+                }
+
+                $index = 0
+                foreach ($settings in @(Get-CollectorNetworkProperty $row 'applicationGatewayBackendHttpSettings')) {
+                    $index++
+                    $properties = Get-CollectorNetworkProperty $settings 'properties'
+                    $childId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'backendHttpSettingsCollection' -Child $settings -Index $index
+                    $probeId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'probe') 'id')
+                    $applicationGatewayBackendHttpSettings.Add([pscustomobject][ordered]@{
+                        id                            = $childId
+                        name                          = [string](Get-CollectorNetworkProperty $settings 'name')
+                        applicationGatewayId          = $id
+                        port                          = Get-CollectorNetworkProperty $properties 'port'
+                        protocol                      = [string](Get-CollectorNetworkProperty $properties 'protocol')
+                        cookieBasedAffinity           = [string](Get-CollectorNetworkProperty $properties 'cookieBasedAffinity')
+                        requestTimeout                = Get-CollectorNetworkProperty $properties 'requestTimeout'
+                        pickHostNameFromBackendAddress = Get-CollectorNetworkProperty $properties 'pickHostNameFromBackendAddress'
+                        probeId                       = $probeId
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsApplicationGatewayBackendHttpSettings' -TargetId $childId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    if (-not [string]::IsNullOrWhiteSpace($probeId)) {
+                        $relationship = New-CollectorNetworkRelationship -SourceId $childId -Relationship 'UsesApplicationGatewayProbe' -TargetId $probeId
+                        if ($relationship) { $relationships.Add($relationship) }
+                    }
+                }
+
+                $index = 0
+                foreach ($probe in @(Get-CollectorNetworkProperty $row 'applicationGatewayProbes')) {
+                    $index++
+                    $properties = Get-CollectorNetworkProperty $probe 'properties'
+                    $childId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'probes' -Child $probe -Index $index
+                    $match = Get-CollectorNetworkProperty $properties 'match'
+                    $applicationGatewayProbes.Add([pscustomobject][ordered]@{
+                        id                            = $childId
+                        name                          = [string](Get-CollectorNetworkProperty $probe 'name')
+                        applicationGatewayId          = $id
+                        protocol                      = [string](Get-CollectorNetworkProperty $properties 'protocol')
+                        host                          = [string](Get-CollectorNetworkProperty $properties 'host')
+                        path                          = [string](Get-CollectorNetworkProperty $properties 'path')
+                        port                          = Get-CollectorNetworkProperty $properties 'port'
+                        interval                      = Get-CollectorNetworkProperty $properties 'interval'
+                        timeout                       = Get-CollectorNetworkProperty $properties 'timeout'
+                        unhealthyThreshold            = Get-CollectorNetworkProperty $properties 'unhealthyThreshold'
+                        pickHostNameFromBackendHttpSettings = Get-CollectorNetworkProperty $properties 'pickHostNameFromBackendHttpSettings'
+                        statusCodes                   = ConvertTo-CollectorNetworkStringArray (Get-CollectorNetworkProperty $match 'statusCodes')
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsApplicationGatewayProbe' -TargetId $childId
+                    if ($relationship) { $relationships.Add($relationship) }
+                }
+
+                $index = 0
+                foreach ($listener in @(Get-CollectorNetworkProperty $row 'applicationGatewayHttpListeners')) {
+                    $index++
+                    $properties = Get-CollectorNetworkProperty $listener 'properties'
+                    $childId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'httpListeners' -Child $listener -Index $index
+                    $frontendId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'frontendIPConfiguration') 'id')
+                    $frontendPortId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'frontendPort') 'id')
+                    $listenerFirewallPolicyId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'firewallPolicy') 'id')
+                    $applicationGatewayHttpListeners.Add([pscustomobject][ordered]@{
+                        id                      = $childId
+                        name                    = [string](Get-CollectorNetworkProperty $listener 'name')
+                        applicationGatewayId    = $id
+                        frontendIpConfigurationId = $frontendId
+                        frontendPortId          = $frontendPortId
+                        protocol                = [string](Get-CollectorNetworkProperty $properties 'protocol')
+                        hostName                = [string](Get-CollectorNetworkProperty $properties 'hostName')
+                        requireServerNameIndication = Get-CollectorNetworkProperty $properties 'requireServerNameIndication'
+                        firewallPolicyId        = $listenerFirewallPolicyId
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsApplicationGatewayHttpListener' -TargetId $childId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    foreach ($target in @(
+                        [pscustomobject]@{ Id = $frontendId; Relation = 'UsesApplicationGatewayFrontend' },
+                        [pscustomobject]@{ Id = $frontendPortId; Relation = 'UsesApplicationGatewayFrontendPort' },
+                        [pscustomobject]@{ Id = $listenerFirewallPolicyId; Relation = 'UsesFirewallPolicy' }
+                    )) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$target.Id)) {
+                            $relationship = New-CollectorNetworkRelationship -SourceId $childId -Relationship $target.Relation -TargetId ([string]$target.Id)
+                            if ($relationship) { $relationships.Add($relationship) }
+                        }
+                    }
+                }
+
+                $index = 0
+                foreach ($rule in @(Get-CollectorNetworkProperty $row 'applicationGatewayRequestRoutingRules')) {
+                    $index++
+                    $properties = Get-CollectorNetworkProperty $rule 'properties'
+                    $childId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'requestRoutingRules' -Child $rule -Index $index
+                    $listenerId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'httpListener') 'id')
+                    $backendPoolId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'backendAddressPool') 'id')
+                    $backendHttpSettingsId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'backendHttpSettings') 'id')
+                    $urlPathMapId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'urlPathMap') 'id')
+                    $redirectConfigurationId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'redirectConfiguration') 'id')
+                    $applicationGatewayRequestRoutingRules.Add([pscustomobject][ordered]@{
+                        id                    = $childId
+                        name                  = [string](Get-CollectorNetworkProperty $rule 'name')
+                        applicationGatewayId  = $id
+                        ruleType              = [string](Get-CollectorNetworkProperty $properties 'ruleType')
+                        priority              = Get-CollectorNetworkProperty $properties 'priority'
+                        httpListenerId        = $listenerId
+                        backendAddressPoolId  = $backendPoolId
+                        backendHttpSettingsId = $backendHttpSettingsId
+                        urlPathMapId          = $urlPathMapId
+                        redirectConfigurationId = $redirectConfigurationId
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsApplicationGatewayRoutingRule' -TargetId $childId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    foreach ($target in @(
+                        [pscustomobject]@{ Id = $listenerId; Relation = 'UsesApplicationGatewayHttpListener' },
+                        [pscustomobject]@{ Id = $backendPoolId; Relation = 'UsesApplicationGatewayBackendPool' },
+                        [pscustomobject]@{ Id = $backendHttpSettingsId; Relation = 'UsesApplicationGatewayBackendHttpSettings' },
+                        [pscustomobject]@{ Id = $urlPathMapId; Relation = 'UsesApplicationGatewayUrlPathMap' }
+                    )) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$target.Id)) {
+                            $relationship = New-CollectorNetworkRelationship -SourceId $childId -Relationship $target.Relation -TargetId ([string]$target.Id)
+                            if ($relationship) { $relationships.Add($relationship) }
+                        }
+                    }
+                }
+
+                $mapIndex = 0
+                foreach ($urlPathMap in @(Get-CollectorNetworkProperty $row 'applicationGatewayUrlPathMaps')) {
+                    $mapIndex++
+                    $properties = Get-CollectorNetworkProperty $urlPathMap 'properties'
+                    $mapId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'urlPathMaps' -Child $urlPathMap -Index $mapIndex
+                    $defaultBackendPoolId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'defaultBackendAddressPool') 'id')
+                    $defaultBackendHttpSettingsId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'defaultBackendHttpSettings') 'id')
+                    $defaultRedirectConfigurationId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'defaultRedirectConfiguration') 'id')
+                    $pathRules = @(Get-CollectorNetworkProperty $properties 'pathRules')
+                    $applicationGatewayUrlPathMaps.Add([pscustomobject][ordered]@{
+                        id                           = $mapId
+                        name                         = [string](Get-CollectorNetworkProperty $urlPathMap 'name')
+                        applicationGatewayId         = $id
+                        defaultBackendAddressPoolId  = $defaultBackendPoolId
+                        defaultBackendHttpSettingsId = $defaultBackendHttpSettingsId
+                        defaultRedirectConfigurationId = $defaultRedirectConfigurationId
+                        pathRuleCount                = $pathRules.Count
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsApplicationGatewayUrlPathMap' -TargetId $mapId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    foreach ($target in @(
+                        [pscustomobject]@{ Id = $defaultBackendPoolId; Relation = 'UsesApplicationGatewayBackendPool' },
+                        [pscustomobject]@{ Id = $defaultBackendHttpSettingsId; Relation = 'UsesApplicationGatewayBackendHttpSettings' }
+                    )) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$target.Id)) {
+                            $relationship = New-CollectorNetworkRelationship -SourceId $mapId -Relationship $target.Relation -TargetId ([string]$target.Id)
+                            if ($relationship) { $relationships.Add($relationship) }
+                        }
+                    }
+
+                    $pathIndex = 0
+                    foreach ($pathRule in $pathRules) {
+                        $pathIndex++
+                        $pathProperties = Get-CollectorNetworkProperty $pathRule 'properties'
+                        $pathRuleId = Get-CollectorNetworkChildId -ParentId $mapId -CollectionName 'pathRules' -Child $pathRule -Index $pathIndex
+                        $backendPoolId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $pathProperties 'backendAddressPool') 'id')
+                        $backendHttpSettingsId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $pathProperties 'backendHttpSettings') 'id')
+                        $redirectConfigurationId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $pathProperties 'redirectConfiguration') 'id')
+                        $applicationGatewayPathRules.Add([pscustomobject][ordered]@{
+                            id                    = $pathRuleId
+                            name                  = [string](Get-CollectorNetworkProperty $pathRule 'name')
+                            urlPathMapId          = $mapId
+                            paths                 = ConvertTo-CollectorNetworkStringArray (Get-CollectorNetworkProperty $pathProperties 'paths')
+                            backendAddressPoolId  = $backendPoolId
+                            backendHttpSettingsId = $backendHttpSettingsId
+                            redirectConfigurationId = $redirectConfigurationId
+                        })
+                        $relationship = New-CollectorNetworkRelationship -SourceId $mapId -Relationship 'ContainsApplicationGatewayPathRule' -TargetId $pathRuleId
+                        if ($relationship) { $relationships.Add($relationship) }
+                        foreach ($target in @(
+                            [pscustomobject]@{ Id = $backendPoolId; Relation = 'UsesApplicationGatewayBackendPool' },
+                            [pscustomobject]@{ Id = $backendHttpSettingsId; Relation = 'UsesApplicationGatewayBackendHttpSettings' }
+                        )) {
+                            if (-not [string]::IsNullOrWhiteSpace([string]$target.Id)) {
+                                $relationship = New-CollectorNetworkRelationship -SourceId $pathRuleId -Relationship $target.Relation -TargetId ([string]$target.Id)
+                                if ($relationship) { $relationships.Add($relationship) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            'microsoft.network/azurefirewalls' {
+                $firewallPolicyId = [string](Get-CollectorNetworkProperty $row 'azureFirewallPolicyId')
+                $virtualHubId = [string](Get-CollectorNetworkProperty $row 'azureFirewallVirtualHubId')
+                $azureFirewalls.Add([pscustomobject][ordered]@{
+                    id              = $id
+                    name            = $name
+                    subscriptionId  = $subscriptionId
+                    resourceGroup   = $resourceGroup
+                    location        = $location
+                    skuName         = [string](Get-CollectorNetworkProperty $row 'azureFirewallSkuName')
+                    skuTier         = [string](Get-CollectorNetworkProperty $row 'azureFirewallSkuTier')
+                    threatIntelMode = [string](Get-CollectorNetworkProperty $row 'azureFirewallThreatIntelMode')
+                    firewallPolicyId = $firewallPolicyId
+                    virtualHubId    = $virtualHubId
+                    zones           = $zones
+                    tags            = $tags
+                })
+
+                foreach ($target in @(
+                    [pscustomobject]@{ Id = $firewallPolicyId; Relation = 'UsesFirewallPolicy' },
+                    [pscustomobject]@{ Id = $virtualHubId; Relation = 'AttachedToVirtualHub' }
+                )) {
+                    if (-not [string]::IsNullOrWhiteSpace([string]$target.Id)) {
+                        $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship $target.Relation -TargetId ([string]$target.Id)
+                        if ($relationship) { $relationships.Add($relationship) }
+                    }
+                }
+
+                $index = 0
+                foreach ($ipConfig in @(Get-CollectorNetworkProperty $row 'azureFirewallIpConfigurations')) {
+                    $index++
+                    $properties = Get-CollectorNetworkProperty $ipConfig 'properties'
+                    $childId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'ipConfigurations' -Child $ipConfig -Index $index
+                    $subnetId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'subnet') 'id')
+                    $publicIpId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'publicIPAddress') 'id')
+                    $azureFirewallIpConfigurations.Add([pscustomobject][ordered]@{
+                        id              = $childId
+                        name            = [string](Get-CollectorNetworkProperty $ipConfig 'name')
+                        azureFirewallId = $id
+                        role            = 'Data'
+                        privateIpAddress = [string](Get-CollectorNetworkProperty $properties 'privateIPAddress')
+                        subnetId        = $subnetId
+                        publicIpAddressId = $publicIpId
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsAzureFirewallIpConfiguration' -TargetId $childId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    foreach ($target in @(
+                        [pscustomobject]@{ Id = $subnetId; Relation = 'AttachedToSubnet' },
+                        [pscustomobject]@{ Id = $publicIpId; Relation = 'UsesPublicIp' }
+                    )) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$target.Id)) {
+                            $relationship = New-CollectorNetworkRelationship -SourceId $childId -Relationship $target.Relation -TargetId ([string]$target.Id)
+                            if ($relationship) { $relationships.Add($relationship) }
+                        }
+                    }
+                }
+
+                $managementIpConfig = Get-CollectorNetworkProperty $row 'azureFirewallManagementIpConfiguration'
+                if ($null -ne $managementIpConfig) {
+                    $properties = Get-CollectorNetworkProperty $managementIpConfig 'properties'
+                    $childId = Get-CollectorNetworkChildId -ParentId $id -CollectionName 'managementIpConfiguration' -Child $managementIpConfig -Index 1
+                    $subnetId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'subnet') 'id')
+                    $publicIpId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $properties 'publicIPAddress') 'id')
+                    $azureFirewallIpConfigurations.Add([pscustomobject][ordered]@{
+                        id               = $childId
+                        name             = [string](Get-CollectorNetworkProperty $managementIpConfig 'name')
+                        azureFirewallId  = $id
+                        role             = 'Management'
+                        privateIpAddress = [string](Get-CollectorNetworkProperty $properties 'privateIPAddress')
+                        subnetId         = $subnetId
+                        publicIpAddressId = $publicIpId
+                    })
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'ContainsAzureFirewallManagementIpConfiguration' -TargetId $childId
+                    if ($relationship) { $relationships.Add($relationship) }
+                    foreach ($target in @(
+                        [pscustomobject]@{ Id = $subnetId; Relation = 'AttachedToSubnet' },
+                        [pscustomobject]@{ Id = $publicIpId; Relation = 'UsesPublicIp' }
+                    )) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$target.Id)) {
+                            $relationship = New-CollectorNetworkRelationship -SourceId $childId -Relationship $target.Relation -TargetId ([string]$target.Id)
+                            if ($relationship) { $relationships.Add($relationship) }
+                        }
+                    }
+                }
+            }
+
+            'microsoft.network/firewallpolicies' {
+                $basePolicyId = [string](Get-CollectorNetworkProperty $row 'firewallPolicyBasePolicyId')
+                $firewallPolicies.Add([pscustomobject][ordered]@{
+                    id              = $id
+                    name            = $name
+                    subscriptionId  = $subscriptionId
+                    resourceGroup   = $resourceGroup
+                    location        = $location
+                    skuTier         = [string](Get-CollectorNetworkProperty $row 'firewallPolicySkuTier')
+                    threatIntelMode = [string](Get-CollectorNetworkProperty $row 'firewallPolicyThreatIntelMode')
+                    basePolicyId    = $basePolicyId
+                    tags            = $tags
+                })
+                if (-not [string]::IsNullOrWhiteSpace($basePolicyId)) {
+                    $relationship = New-CollectorNetworkRelationship -SourceId $id -Relationship 'InheritsFromFirewallPolicy' -TargetId $basePolicyId
+                    if ($relationship) { $relationships.Add($relationship) }
+                }
+            }
         }
     }
 
@@ -546,6 +1348,33 @@ function ConvertTo-CollectorNetworkInventory {
             localNetworkGateways   = $localNetworkGateways.Count
             connections            = $connections.Count
             networkWatchers        = $networkWatchers.Count
+            privateEndpoints       = $privateEndpoints.Count
+            privateLinkConnections = $privateLinkConnections.Count
+            privateDnsZones        = $privateDnsZones.Count
+            privateDnsVirtualNetworkLinks = $privateDnsVirtualNetworkLinks.Count
+            natGateways            = $natGateways.Count
+            loadBalancers          = $loadBalancers.Count
+            loadBalancerFrontends  = $loadBalancerFrontendIpConfigurations.Count
+            loadBalancerBackendPools = $loadBalancerBackendPools.Count
+            loadBalancerBackendAddresses = $loadBalancerBackendAddresses.Count
+            loadBalancerRules      = $loadBalancerRules.Count
+            loadBalancerProbes     = $loadBalancerProbes.Count
+            loadBalancerOutboundRules = $loadBalancerOutboundRules.Count
+            applicationGateways    = $applicationGateways.Count
+            applicationGatewayIpConfigurations = $applicationGatewayIpConfigurations.Count
+            applicationGatewayFrontends = $applicationGatewayFrontendIpConfigurations.Count
+            applicationGatewayFrontendPorts = $applicationGatewayFrontendPorts.Count
+            applicationGatewayBackendPools = $applicationGatewayBackendPools.Count
+            applicationGatewayBackendAddresses = $applicationGatewayBackendAddresses.Count
+            applicationGatewayBackendHttpSettings = $applicationGatewayBackendHttpSettings.Count
+            applicationGatewayHttpListeners = $applicationGatewayHttpListeners.Count
+            applicationGatewayRoutingRules = $applicationGatewayRequestRoutingRules.Count
+            applicationGatewayProbes = $applicationGatewayProbes.Count
+            applicationGatewayUrlPathMaps = $applicationGatewayUrlPathMaps.Count
+            applicationGatewayPathRules = $applicationGatewayPathRules.Count
+            azureFirewalls          = $azureFirewalls.Count
+            azureFirewallIpConfigurations = $azureFirewallIpConfigurations.Count
+            firewallPolicies        = $firewallPolicies.Count
             relationships          = $sortedRelationships.Count
         }
         virtualNetworks        = @($virtualNetworks | Sort-Object subscriptionId, resourceGroup, name, id)
@@ -562,6 +1391,33 @@ function ConvertTo-CollectorNetworkInventory {
         localNetworkGateways   = @($localNetworkGateways | Sort-Object subscriptionId, resourceGroup, name, id)
         connections            = @($connections | Sort-Object subscriptionId, resourceGroup, name, id)
         networkWatchers        = @($networkWatchers | Sort-Object subscriptionId, resourceGroup, name, id)
+        privateEndpoints       = @($privateEndpoints | Sort-Object subscriptionId, resourceGroup, name, id)
+        privateLinkConnections = @($privateLinkConnections | Sort-Object privateEndpointId, name, id)
+        privateDnsZones        = @($privateDnsZones | Sort-Object subscriptionId, resourceGroup, name, id)
+        privateDnsVirtualNetworkLinks = @($privateDnsVirtualNetworkLinks | Sort-Object privateDnsZoneId, name, id)
+        natGateways            = @($natGateways | Sort-Object subscriptionId, resourceGroup, name, id)
+        loadBalancers          = @($loadBalancers | Sort-Object subscriptionId, resourceGroup, name, id)
+        loadBalancerFrontendIpConfigurations = @($loadBalancerFrontendIpConfigurations | Sort-Object loadBalancerId, name, id)
+        loadBalancerBackendPools = @($loadBalancerBackendPools | Sort-Object loadBalancerId, name, id)
+        loadBalancerBackendAddresses = @($loadBalancerBackendAddresses | Sort-Object backendPoolId, name, id)
+        loadBalancerRules      = @($loadBalancerRules | Sort-Object loadBalancerId, name, id)
+        loadBalancerProbes     = @($loadBalancerProbes | Sort-Object loadBalancerId, name, id)
+        loadBalancerOutboundRules = @($loadBalancerOutboundRules | Sort-Object loadBalancerId, name, id)
+        applicationGateways    = @($applicationGateways | Sort-Object subscriptionId, resourceGroup, name, id)
+        applicationGatewayIpConfigurations = @($applicationGatewayIpConfigurations | Sort-Object applicationGatewayId, name, id)
+        applicationGatewayFrontendIpConfigurations = @($applicationGatewayFrontendIpConfigurations | Sort-Object applicationGatewayId, name, id)
+        applicationGatewayFrontendPorts = @($applicationGatewayFrontendPorts | Sort-Object applicationGatewayId, port, name, id)
+        applicationGatewayBackendPools = @($applicationGatewayBackendPools | Sort-Object applicationGatewayId, name, id)
+        applicationGatewayBackendAddresses = @($applicationGatewayBackendAddresses | Sort-Object backendPoolId, fqdn, ipAddress, id)
+        applicationGatewayBackendHttpSettings = @($applicationGatewayBackendHttpSettings | Sort-Object applicationGatewayId, name, id)
+        applicationGatewayHttpListeners = @($applicationGatewayHttpListeners | Sort-Object applicationGatewayId, name, id)
+        applicationGatewayRequestRoutingRules = @($applicationGatewayRequestRoutingRules | Sort-Object applicationGatewayId, priority, name, id)
+        applicationGatewayProbes = @($applicationGatewayProbes | Sort-Object applicationGatewayId, name, id)
+        applicationGatewayUrlPathMaps = @($applicationGatewayUrlPathMaps | Sort-Object applicationGatewayId, name, id)
+        applicationGatewayPathRules = @($applicationGatewayPathRules | Sort-Object urlPathMapId, name, id)
+        azureFirewalls         = @($azureFirewalls | Sort-Object subscriptionId, resourceGroup, name, id)
+        azureFirewallIpConfigurations = @($azureFirewallIpConfigurations | Sort-Object azureFirewallId, role, name, id)
+        firewallPolicies       = @($firewallPolicies | Sort-Object subscriptionId, resourceGroup, name, id)
         relationships          = $sortedRelationships
     }
 }
