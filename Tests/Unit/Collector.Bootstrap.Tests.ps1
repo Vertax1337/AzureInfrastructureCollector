@@ -59,7 +59,7 @@ Describe 'Ensure-CollectorDependencies' {
         $result.Count | Should -Be 1
         $result[0].installedByBootstrap | Should -BeFalse
         $result[0].scope | Should -Be 'ExistingInstallation'
-        Assert-MockCalled Install-Module -ModuleName Collector.Bootstrap -Times 0
+        Should -Invoke Install-Module -ModuleName Collector.Bootstrap -Times 0 -Exactly
     }
 
     It 'installs a missing module only in CurrentUser scope' {
@@ -80,7 +80,7 @@ Describe 'Ensure-CollectorDependencies' {
 
         $result[0].installedByBootstrap | Should -BeTrue
         $result[0].scope | Should -Be 'CurrentUser'
-        Assert-MockCalled Install-Module -ModuleName Collector.Bootstrap -Times 1 -ParameterFilter {
+        Should -Invoke Install-Module -ModuleName Collector.Bootstrap -Times 1 -Exactly -ParameterFilter {
             $Name -eq 'Az.ResourceGraph' -and
             $Repository -eq 'PSGallery' -and
             $Scope -eq 'CurrentUser'
@@ -94,6 +94,6 @@ Describe 'Ensure-CollectorDependencies' {
             Ensure-CollectorDependencies -RequiredModules @('Az.Accounts')
         } | Should -Throw '*is not registered*'
 
-        Assert-MockCalled Install-Module -ModuleName Collector.Bootstrap -Times 0
+        Should -Invoke Install-Module -ModuleName Collector.Bootstrap -Times 0 -Exactly
     }
 }
