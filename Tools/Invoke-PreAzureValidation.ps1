@@ -14,7 +14,7 @@ if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
 
 $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $minimumPowerShellVersion = [version]$config.requirements.minimumPowerShellVersion
-$minimumPesterVersion = [version]$config.validation.minimumPesterVersion
+$requiredPesterVersion = [version]$config.validation.requiredPesterVersion
 
 # Keep this preflight compatible with Windows PowerShell 5.1 so an accidental
 # powershell.exe invocation fails cleanly before PowerShell-7-only code is loaded.
@@ -54,51 +54,73 @@ Write-Host ("      Status: {0}" -f $initialReadOnly.status)
 
 Write-Host '[2/4] Pester prerequisite...'
 $pesterModule = Get-Module -ListAvailable -Name Pester |
-    Where-Object { $_.Version -ge $minimumPesterVersion } |
-    Sort-Object Version -Descending |
+    Where-Object { $_.Version -eq $requiredPesterVersion } |
     Select-Object -First 1
 
 if (-not $pesterModule) {
     if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) {
-        Write-Error "Pester $minimumPesterVersion or newer is required, but Install-Module is unavailable. No elevation will be attempted."
+        Write-Error "Pester $requiredPesterVersion is required, but Install-Module is unavailable. No elevation will be attempted."
         exit 8
     }
 
     $repositoryInfo = Get-PSRepository -Name 'PSGallery' -ErrorAction SilentlyContinue
     if (-not $repositoryInfo) {
-        Write-Error "Pester $minimumPesterVersion or newer is required, but PSGallery is not registered. Repository configuration will not be changed automatically."
+        Write-Error "Pester $requiredPesterVersion is required, but PSGallery is not registered. Repository configuration will not be changed automatically."
         exit 8
     }
 
-    Write-Host ("      Pester {0}+ not found. Installing from PSGallery for CurrentUser only..." -f $minimumPesterVersion)
+    Write-Host ("      Pester {0} not found. Installing exactly this version from PSGallery for CurrentUser only..." -f $requiredPesterVersion)
 
     try {
         Install-Module `
             -Name Pester `
-            -MinimumVersion $minimumPesterVersion `
+            -RequiredVersion $requiredPesterVersion `
             -Repository PSGallery `
             -Scope CurrentUser `
             -Force `
             -ErrorAction Stop
     }
     catch {
-        Write-Error "Failed to install Pester $minimumPesterVersion or newer for CurrentUser. No administrator elevation was attempted. $($_.Exception.Message)"
+        Write-Error "Failed to install Pester $requiredPesterVersion for CurrentUser. No administrator elevation was attempted. $($_.Exception.Message)"
         exit 8
     }
 
     $pesterModule = Get-Module -ListAvailable -Name Pester |
-        Where-Object { $_.Version -ge $minimumPesterVersion } |
-        Sort-Object Version -Descending |
+        Where-Object { $_.Version -eq $requiredPesterVersion } |
         Select-Object -First 1
 }
 
 if (-not $pesterModule) {
-    Write-Error "Pester $minimumPesterVersion or newer is still unavailable after dependency handling."
+    Write-Error "Required Pester version $requiredPesterVersion is unavailable after dependency handling."
     exit 8
 }
 
-Import-Module Pester -MinimumVersion $minimumPesterVersion -Force -ErrorAction Stop
-Write-Host ("      Pester: {0}" -f $pesterModule.Version)
+# The workstation can contain legacy inbox/system Pester versions (for example 3.4.0).
+# Remove any already-loaded Pester module and import the exact validated module path so
+# command auto-loading cannot mix multiple Pester generations during the test run.
+Get-Module -Name Pester -All | Remove-Module -Force -ErrorAction SilentlyContinue
+Import-Module -Name $pesterModule.Path -Force -ErrorAction Stop
+
+$loadedPester = Get-Module -Name Pester |
+    Where-Object { $_.Version -eq $requiredPesterVersion } |
+    Select-Object -First 1
+
+if (-not $loadedPester) {
+    Write-Error "Pester $requiredPesterVersion was found but could not be loaded as the active validation module."
+    exit 8
+}
+
+$requiredPesterCommands = @('Invoke-Pester', 'Describe', 'BeforeAll', 'BeforeEach', 'Mock', 'Should')
+foreach ($commandName in $requiredPesterCommands) {
+    $command = Get-Command -Name $commandName -ErrorAction Stop
+    if ($command.Source -ne 'Pester') {
+        Write-Error "Validation command '$commandName' resolved from '$($command.Source)' instead of the pinned Pester $requiredPesterVersion module. Validation is blocked."
+        exit 8
+    }
+}
+
+Write-Host ("      Pester: {0}" -f $loadedPester.Version)
+Write-Host ("      Module: {0}" -f $loadedPester.Path)
 
 Write-Host '[3/4] Pester test suite...'
 $pesterResult = Invoke-Pester -Path $testsPath -PassThru
@@ -128,7 +150,7 @@ Write-Host ''
 Write-Host 'PRE-AZURE VALIDATION RESULT'
 Write-Host 'Status: READY FOR AZURE TEST'
 Write-Host ("Initial read-only gate: {0}" -f $initialReadOnly.status)
-Write-Host ("Pester: {0}; Passed: {1}; Failed: {2}; Skipped: {3}" -f $pesterModule.Version, $pesterResult.PassedCount, $pesterResult.FailedCount, $pesterResult.SkippedCount)
+Write-Host ("Pester: {0}; Passed: {1}; Failed: {2}; Skipped: {3}" -f $loadedPester.Version, $pesterResult.PassedCount, $pesterResult.FailedCount, $pesterResult.SkippedCount)
 Write-Host ("Final read-only gate: {0}" -f $finalReadOnly.status)
 Write-Host 'Azure access performed: NO'
 Write-Host 'Administrator elevation: NOT USED'
