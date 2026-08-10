@@ -1,7 +1,7 @@
 # Read-Only Verification – Core MVP 0.1.0
 
 > Verification date: 2026-08-10  
-> Scope: current `main`, including bootstrap/dependency handling  
+> Scope: current `main`, including bootstrap/dependency and pre-Azure validation handling  
 > Manual/static verification result: **READ-ONLY VERIFIED**
 
 This document records the read-only review required before the first real Azure test.
@@ -32,7 +32,7 @@ The executable collector scope uses only:
 | `Set-AzContext -Scope Process` | Select tenant/subscription for the current PowerShell process | Approved local/session context operation; `Process` scope is enforced by the gate |
 | `Search-AzGraph` | Query Azure Resource Graph | Approved read-only inventory query |
 
-No Azure write cmdlet was added by the bootstrap implementation.
+Neither bootstrap nor pre-Azure validation adds an Azure command.
 
 ## Resource Graph queries reviewed
 
@@ -68,9 +68,28 @@ Explicitly not implemented:
 
 If PowerShell 7.2+ or PSGallery is unavailable, bootstrap fails instead of elevating or changing workstation-wide configuration.
 
+## Mandatory pre-Azure validation
+
+`Tools/Invoke-PreAzureValidation.ps1` is the canonical Azure-free validation workflow before the first real Azure test and after later executable-code changes.
+
+It performs:
+
+1. PowerShell 7.2+ runtime validation,
+2. initial `READ-ONLY VERIFIED` source-code gate,
+3. Pester 5.5.0+ discovery,
+4. if necessary, Pester installation from the already registered `PSGallery` with literal `-Scope CurrentUser`,
+5. complete Pester execution for `./Tests` with `-PassThru`,
+6. failure if any Pester test fails or no result can be proven,
+7. final read-only source-code gate,
+8. final `READY FOR AZURE TEST` status only if every mandatory check succeeded.
+
+The validation workflow does not call `Connect-AzAccount`, `Search-AzGraph`, or any other Azure operation. It performs no Azure authentication and no Azure request.
+
+Pester remains a validation/development dependency and is not required for a normal collector run after validation. Its minimum version is defined in `Config/collector.config.json` as `validation.minimumPesterVersion`.
+
 ## Automatic fail-closed gate
 
-`Modules/Collector.ReadOnlyGuard.psm1` enforces both Azure and bootstrap boundaries.
+`Modules/Collector.ReadOnlyGuard.psm1` enforces both Azure and local bootstrap/validation boundaries.
 
 It:
 
@@ -87,15 +106,13 @@ It:
 - blocks package/PSResource mutation mechanisms outside the approved bootstrap path,
 - treats parse errors as verification failures.
 
-`Start-AzureInfrastructureCollector.ps1` runs the gate before dependency installation. `Collect-AzureDocumentation.ps1` runs it again before Azure authentication/inventory collection.
+`Invoke-PreAzureValidation.ps1` runs the gate before and after Pester. `Start-AzureInfrastructureCollector.ps1` runs the gate before runtime dependency installation. `Collect-AzureDocumentation.ps1` runs it again before Azure authentication/inventory collection.
 
 ## Windows PowerShell 5.1 handling
 
-The project runtime is PowerShell 7.2+ (`pwsh.exe`). Legacy Windows PowerShell 5.1 (`powershell.exe`) is not supported for the collector or the standalone verification.
+The project runtime is PowerShell 7.2+ (`pwsh.exe`). Legacy Windows PowerShell 5.1 (`powershell.exe`) is not supported for the collector or validation tools.
 
-`Tools/Test-ReadOnlyCompliance.ps1` contains a PowerShell-5.1-compatible runtime preflight before importing the guard. If the checker is started via `powershell.exe`, it exits with code `7`, makes no Azure request and instructs the operator to rerun it using `pwsh.exe`.
-
-This prevents low-level compatibility failures such as missing .NET methods from being mistaken for a read-only verification failure.
+Both validation entry points contain a PowerShell-5.1-compatible runtime preflight before importing the guard. If started via `powershell.exe`, they exit without making any Azure request and instruct the operator to rerun using `pwsh.exe`.
 
 ## Tests
 
@@ -114,36 +131,34 @@ The Pester suite includes:
 - dependency reuse,
 - missing dependency installation in `CurrentUser` scope.
 
-`.github/workflows/read-only-gate.yml` runs the source-code gate and Pester tests on pushes to `main` and pull requests with repository permission restricted to `contents: read`.
+`.github/workflows/read-only-gate.yml` invokes the same canonical `Tools/Invoke-PreAzureValidation.ps1` used locally. The workflow repository permission remains restricted to `contents: read`.
 
-## Mandatory local check before the first Azure test
-
-The manual/static review above verifies the code design and Azure command surface. Before the first real Azure connection, the local checkout must execute the actual PowerShell parser/gate and test suite under **PowerShell 7**.
+## Mandatory command before the first real Azure test
 
 From PowerShell 7:
 
 ```powershell
-./Tools/Test-ReadOnlyCompliance.ps1
-Invoke-Pester ./Tests
+./Tools/Invoke-PreAzureValidation.ps1
 ```
 
 Or explicitly from another shell:
 
 ```powershell
-pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Test-ReadOnlyCompliance.ps1
-pwsh.exe -NoProfile -Command "Invoke-Pester .\Tests"
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Invoke-PreAzureValidation.ps1
 ```
 
-The Azure test is permitted only if the first command reports exactly:
+The Azure test is permitted only if the workflow completes with:
 
 ```text
-Status: READ-ONLY VERIFIED
+PRE-AZURE VALIDATION RESULT
+Status: READY FOR AZURE TEST
+Initial read-only gate: READ-ONLY VERIFIED
+Pester: <version>; Passed: <n>; Failed: 0; Skipped: <n>
+Final read-only gate: READ-ONLY VERIFIED
+Azure access performed: NO
+Administrator elevation: NOT USED
 ```
-
-and the Pester suite has no failures.
-
-The standalone read-only gate itself performs no Azure authentication and no Azure request.
 
 ## Future changes
 
-Any new or changed Azure command, API path, dependency mechanism, module mutation path or executable code invalidates the previous approval until the mandatory read-only verification is repeated.
+Any new or changed Azure command, API path, dependency mechanism, module mutation path or executable code invalidates the previous approval until the mandatory pre-Azure validation has been repeated successfully.
