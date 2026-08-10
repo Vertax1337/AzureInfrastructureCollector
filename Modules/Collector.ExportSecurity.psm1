@@ -36,6 +36,22 @@ function Protect-CollectorExportValue {
         return $null
     }
 
+    # Scalars must be handled before PSCustomObject/ETS property inspection. Without
+    # this ordering PowerShell can expose scalar adapter properties (for example the
+    # Length property of a string) and the exported value loses its actual content.
+    if ($Value -is [string]) {
+        if (Test-CollectorSensitiveScalarValue -Value $Value -SensitiveValuePatterns $SensitiveValuePatterns) {
+            return '[REDACTED]'
+        }
+
+        return [string]$Value
+    }
+
+    $baseObject = $Value.PSObject.BaseObject
+    if ($null -ne $baseObject -and $baseObject.GetType().IsValueType) {
+        return $baseObject
+    }
+
     if ($Value -is [System.Collections.IDictionary]) {
         $sanitized = [ordered]@{}
         foreach ($key in @($Value.Keys | Sort-Object)) {
@@ -52,6 +68,41 @@ function Protect-CollectorExportValue {
         return $sanitized
     }
 
+    # Enumerables must be handled before PSCustomObject inspection as arrays/lists can
+    # otherwise be serialized through their adapter metadata (Count/Length/SyncRoot).
+    # Accidental nested enumerable wrappers are flattened because the collector JSON
+    # schema uses arrays of scalar values or objects, not arrays-of-arrays.
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        $sanitizedItems = [System.Collections.Generic.List[object]]::new()
+
+        foreach ($item in $Value) {
+            $sanitizedItem = Protect-CollectorExportValue `
+                -Value $item `
+                -SensitivePropertyPattern $SensitivePropertyPattern `
+                -SensitiveValuePatterns $SensitiveValuePatterns
+
+            $itemIsNestedEnumerable = (
+                $null -ne $item -and
+                $item -is [System.Collections.IEnumerable] -and
+                $item -isnot [string] -and
+                $item -isnot [System.Collections.IDictionary]
+            )
+
+            if ($itemIsNestedEnumerable) {
+                foreach ($nestedItem in @($sanitizedItem)) {
+                    $sanitizedItems.Add($nestedItem)
+                }
+            }
+            else {
+                $sanitizedItems.Add($sanitizedItem)
+            }
+        }
+
+        # Return the array as one pipeline object so empty arrays remain [] instead of
+        # disappearing and becoming $null in a parent property assignment.
+        return ,@($sanitizedItems)
+    }
+
     if ($Value -is [pscustomobject]) {
         $sanitized = [ordered]@{}
         foreach ($property in @($Value.PSObject.Properties | Sort-Object Name)) {
@@ -66,21 +117,6 @@ function Protect-CollectorExportValue {
             }
         }
         return [pscustomobject]$sanitized
-    }
-
-    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
-        $sanitizedItems = @(
-            $Value | ForEach-Object {
-                Protect-CollectorExportValue `
-                    -Value $_ `
-                    -SensitivePropertyPattern $SensitivePropertyPattern `
-                    -SensitiveValuePatterns $SensitiveValuePatterns
-            }
-        )
-
-        # Return the array as one pipeline object so empty arrays remain [] instead of
-        # disappearing and becoming $null in a parent property assignment.
-        return ,$sanitizedItems
     }
 
     if (Test-CollectorSensitiveScalarValue -Value $Value -SensitiveValuePatterns $SensitiveValuePatterns) {
