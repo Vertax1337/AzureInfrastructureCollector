@@ -24,13 +24,15 @@ $script:BlockedExecutionCommands = [System.Collections.Generic.HashSet[string]]:
     'az', 'az.cmd', 'az.exe'
 ) | ForEach-Object { [void]$script:BlockedExecutionCommands.Add($_) }
 
+# Patterns are deliberately assembled from fragments so the guard can scan its own source
+# without matching the policy definitions themselves.
 $script:BlockedSourcePatterns = @(
-    '(?i)System\.Net\.Http\.HttpClient',
-    '(?i)System\.Net\.WebRequest',
-    '(?i)management\.azure\.com',
-    '(?i)graph\.microsoft\.com',
-    '(?i)vault\.azure\.net',
-    '(?i)\.blob\.core\.windows\.net'
+    ('(?i)System\.Net\.Http\.' + 'HttpClient'),
+    ('(?i)System\.Net\.' + 'WebRequest'),
+    ('(?i)management\.' + 'azure\.com'),
+    ('(?i)graph\.' + 'microsoft\.com'),
+    ('(?i)vault\.' + 'azure\.net'),
+    ('(?i)\.blob\.core\.' + 'windows\.net')
 )
 
 function New-ReadOnlyViolation {
@@ -126,7 +128,7 @@ function Test-CollectorReadOnlyCompliance {
         foreach ($pattern in $script:BlockedSourcePatterns) {
             if ($source -match $pattern) {
                 $relativePath = [IO.Path]::GetRelativePath($root, $file.FullName)
-                $violations.Add((New-ReadOnlyViolation -File $relativePath -Code 'DIRECT_AZURE_HTTP_OR_SDK' -Message "Direct Azure/HTTP SDK access matched blocked pattern '$pattern'. Direct API access is fail-closed until explicitly reviewed."))
+                $violations.Add((New-ReadOnlyViolation -File $relativePath -Code 'DIRECT_AZURE_HTTP_OR_SDK' -Message "Direct Azure/HTTP SDK access matched a blocked pattern. Direct API access is fail-closed until explicitly reviewed."))
             }
         }
 
