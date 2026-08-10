@@ -33,6 +33,7 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - `readOnlyVerification.json` in successful collector exports
 - initial Core MVP entry point `Collect-AzureDocumentation.ps1`
 - reusable `Collector.Core.psm1`
+- reusable `Collector.ExportSecurity.psm1` as a centralized final export-hardening layer for current and future collector modules
 - PowerShell and required Az module validation
 - interactive Azure authentication fallback and existing-context reuse
 - tenant discovery and tenant selection
@@ -45,12 +46,19 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - normalized resource and resource-group JSON models
 - visible four-stage collection progress with timestamps, `Write-Progress` status during Azure Resource Graph waits, collected-object counts, JSON-write status and total run duration
 - defense-in-depth redaction of sensitive-looking keys
+- value-based export redaction for signed URL/SAS signatures, account keys/shared-access-signature connection strings, private-key blocks, JWT-shaped tokens and embedded credential assignments
+- subscription-aware canonicalization of Resource Group references in resource inventory
+- public export projection for read-only verification and manifest metadata minimization
+- seven dedicated Pester tests covering export hardening, canonical Resource Group names and metadata minimization
 - tenant-specific timestamped export structure
 - `manifest.json`, `summary.json` and collector log
 - initial Pester unit tests
 
 ### Fixed
 
+- `resources.json` now uses the canonical Resource Group spelling from `resourceGroups.json` for the same subscription instead of preserving inconsistent Resource Graph casing
+- `readOnlyVerification.json` no longer exposes the local collector repository path (`repositoryRoot`)
+- `manifest.json` no longer exports the executing Azure account/UPN
 - normal collector runs no longer pause after Resource Group discovery for an optional `Read-Host` filter prompt; without `-ResourceGroup`, all discovered Resource Groups are collected automatically, while explicit `-ResourceGroup` filtering remains available
 - Azure authentication temporarily forces plain-text rendering (`$PSStyle.OutputRendering = PlainText` plus `NO_COLOR`) so device-code/login text is copyable without raw ANSI escape sequences; previous rendering settings are restored afterwards
 - normal bootstrap import suppresses PowerShell's unapproved-verb discoverability warning without changing module behavior
