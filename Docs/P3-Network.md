@@ -1,6 +1,6 @@
 # P3 – Network
 
-Status: **P3a validation in progress**  
+Status: **P3a real export validated; ready to proceed to P3b after formal Pre-Azure result is recorded**  
 Project: `AzureInfrastructureCollector`  
 Safety boundary: **Read-only / fail closed**
 
@@ -136,7 +136,42 @@ The same regression affected the presentation of `approvedAzureCommandsFound` in
 
 The Local Network Gateway in the first real export had an empty `gatewayIpAddress`. P3a now explicitly projects `properties.fqdn` as `localGatewayFqdn` and normalizes it into a separate `fqdn` field. This allows an FQDN-configured on-premises gateway to be documented without overloading or fabricating `gatewayIpAddress`.
 
-Because executable export-hardening and Network-normalization code changed after this real run, this run does **not** close P3a. The next normal collector start must first pass the complete automatic Pre-Azure validation again and then produce a new real export with stable scalar/array values and correct Local Network Gateway endpoint information.
+## P3a validation real-run – 2026-08-10 14:41
+
+The follow-up real export after the export-shape and FQDN fixes completed successfully and confirmed the intended P3a data model:
+
+- collector status `Success`
+- `READ-ONLY VERIFIED`
+- 12 Resource Groups
+- 134 Core resources
+- 22 top-level Network resources
+- 5 VNets
+- 5 Subnets
+- 12 directed Peerings
+- 4 NICs and 4 IP configurations
+- 4 NSGs and 4 custom Security Rules
+- 3 Public IPs
+- 1 Route Table with 2 Routes
+- 1 Virtual Network Gateway
+- 1 Local Network Gateway
+- 1 Connection
+- 2 Network Watchers
+- 44 unique Relationships
+- 0 collector errors
+
+Validation results:
+
+- all 22 Network top-level IDs match the 22 `Microsoft.Network/*` IDs in the Core inventory,
+- all 44 Relationships are unique,
+- every relationship source/target resolves to a collected top-level resource, normalized child object, or matching Core resource; orphan count = 0,
+- Network summary counts exactly match the actual array lengths,
+- no ETS/array-metadata leakage (`Length`, `Count`, `SyncRoot`, `Rank`, `IsFixedSize`, etc.) remains in `network.json` or `readOnlyVerification.json`,
+- address prefixes, DNS servers, service endpoints and NSG source/destination/port fields are again real string arrays,
+- `approvedAzureCommandsFound` is again an array of readable command-name strings,
+- the Local Network Gateway is correctly represented with `gatewayIpAddress: ""` and `fqdn: "vpn.cannon-deutschland.de"`,
+- no `sharedKey`, SAS signature, account key, private key, JWT-shaped token or embedded credential assignment was found in the export.
+
+The export ZIP does not currently persist the detailed Pre-Azure/Pester result or exact passed-test count. Therefore the real export proves the current collector/read-only/export behavior, while the exact Pester count still has to be retained separately from the console until validation metadata is embedded into the manifest in a future Core improvement.
 
 ## P3b – Extended network services
 
