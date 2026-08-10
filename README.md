@@ -6,25 +6,53 @@ Read-only PowerShell collector for repeatable, customer-neutral Azure infrastruc
 
 > **Supreme safety rule:** No collector build is approved for execution unless the final verification result is `READ-ONLY VERIFIED`.
 
-The collector converts the actual Azure state into a normalized JSON export. Documentation generation, AI analysis, diagrams, DOCX/PDF output and specialized service modules are intentionally separate follow-up stages.
+The authoritative project scope, architecture and safety rules are defined in [`Umsetzungsplan.md`](./Umsetzungsplan.md).
 
-## Core principles
+## Recommended entry point
 
-- customer- and tenant-neutral
-- one tenant per collector run
-- one or multiple subscriptions per run
-- Azure Resource Graph first
-- read-only by design
-- fail-closed read-only verification before Azure access
-- no intentional export of secrets or credentials
-- deterministic, normalized JSON output
-- best-effort collection with errors recorded in the manifest and log
+Use the bootstrap script:
 
-The authoritative project scope, architecture and supreme read-only rule are defined in [`Umsetzungsplan.md`](./Umsetzungsplan.md).
+```powershell
+./Start-AzureInfrastructureCollector.ps1
+```
+
+The bootstrap performs only local prerequisite handling before starting the collector:
+
+1. verifies PowerShell 7.2 or newer,
+2. runs the mandatory local read-only source-code gate,
+3. checks `Az.Accounts` and `Az.ResourceGraph`,
+4. installs a missing required module from `PSGallery` with `-Scope CurrentUser`,
+5. verifies that every required module can be imported,
+6. starts `Collect-AzureDocumentation.ps1`,
+7. the collector runs the read-only gate again before Azure access.
+
+## Administrator rights and elevation
+
+**Local Windows administrator rights are not required for the normal collector workflow.**
+
+Missing Az modules are installed only with:
+
+```powershell
+Install-Module <Module> -Repository PSGallery -Scope CurrentUser
+```
+
+The project deliberately does **not**:
+
+- install modules with `-Scope AllUsers`,
+- call `Start-Process -Verb RunAs`,
+- restart itself elevated,
+- request a UAC administrator token,
+- automatically install or upgrade PowerShell 7.
+
+If PowerShell 7.2+ is missing, the bootstrap stops with an explanatory error. PowerShell installation remains a separate, deliberate workstation/admin task.
+
+If `PSGallery` is not registered, the bootstrap also stops instead of changing repository configuration automatically.
+
+Azure RBAC permissions are separate from local Windows administrator rights. The Azure identity still needs sufficient read permissions for the selected tenant/subscriptions.
 
 ## Mandatory read-only verification
 
-Before the first Azure test and before every later execution approval, run:
+A standalone local verification is available:
 
 ```powershell
 ./Tools/Test-ReadOnlyCompliance.ps1
@@ -41,20 +69,19 @@ Control-plane write operations: NONE DETECTED
 Data-plane write operations: NONE DETECTED
 ```
 
-The collector also executes the same gate automatically at the very beginning of `Collect-AzureDocumentation.ps1`, before authentication or Resource Graph collection. A failed or ambiguous verification blocks execution.
-
-The MVP gate is deliberately strict:
+The gate is fail-closed:
 
 - Azure PowerShell uses an explicit allowlist.
-- Any new `*-Az*` command is blocked until separately reviewed and allowlisted.
+- Any new `*-Az*` command is blocked until reviewed and allowlisted.
 - `Set-AzContext` is allowed only with explicit `-Scope Process`.
 - direct REST/web calls are blocked in the MVP until explicitly reviewed.
 - Azure CLI execution is blocked.
 - dynamic command execution is blocked.
+- `Start-Process` is blocked, preventing self-elevation paths.
 - PowerShell parse errors block approval.
 - suspicious direct Azure HTTP/SDK usage blocks approval.
 
-The currently approved Azure commands are limited to:
+Currently approved Azure commands:
 
 - `Connect-AzAccount`
 - `Get-AzContext`
@@ -63,23 +90,19 @@ The currently approved Azure commands are limited to:
 - `Set-AzContext -Scope Process`
 - `Search-AzGraph`
 
-These operations are used only for authentication/local context selection and read-only inventory queries. Local writes are limited to collector output, logs and local processing.
+Local dependency installation in `CurrentUser` scope does not modify Azure and is part of the approved bootstrap boundary.
 
 ## Requirements
 
 - PowerShell 7.2 or newer
+- network access to PowerShell Gallery when a required module is missing
 - `Az.Accounts`
 - `Az.ResourceGraph`
-- Azure account with read access to the target subscriptions
+- Azure identity with read access to the target scope
 
-Install the required modules if necessary:
+Normally you do **not** need to install the two Az modules manually; the bootstrap handles missing modules for the current user.
 
-```powershell
-Install-Module Az.Accounts -Scope CurrentUser
-Install-Module Az.ResourceGraph -Scope CurrentUser
-```
-
-For tests:
+Pester is required only for development/tests:
 
 ```powershell
 Install-Module Pester -Scope CurrentUser
@@ -87,36 +110,26 @@ Install-Module Pester -Scope CurrentUser
 
 ## Usage
 
-### Safety check first
-
-```powershell
-./Tools/Test-ReadOnlyCompliance.ps1
-```
-
-Do not continue unless the result is `READ-ONLY VERIFIED`.
-
 ### Interactive
 
 ```powershell
-./Collect-AzureDocumentation.ps1
+./Start-AzureInfrastructureCollector.ps1
 ```
 
-The collector reruns the mandatory read-only gate automatically. It then reuses an existing Azure context where possible. If no context exists, an interactive `Connect-AzAccount` login is started. You can then select the tenant and one or more subscriptions.
-
-An optional resource-group filter can be entered after resource groups have been discovered.
+If no usable Azure context exists, the collector starts interactive `Connect-AzAccount`. You then select tenant, subscriptions and optionally Resource Groups.
 
 ### Explicit tenant and subscriptions
 
 ```powershell
-./Collect-AzureDocumentation.ps1 `
+./Start-AzureInfrastructureCollector.ps1 `
     -TenantId 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' `
     -SubscriptionId 'yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy'
 ```
 
-Multiple subscriptions are supported:
+Multiple subscriptions:
 
 ```powershell
-./Collect-AzureDocumentation.ps1 `
+./Start-AzureInfrastructureCollector.ps1 `
     -TenantId 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' `
     -SubscriptionId @(
         '11111111-1111-1111-1111-111111111111',
@@ -127,7 +140,7 @@ Multiple subscriptions are supported:
 ### Resource-group filter
 
 ```powershell
-./Collect-AzureDocumentation.ps1 `
+./Start-AzureInfrastructureCollector.ps1 `
     -TenantId 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' `
     -SubscriptionId 'yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy' `
     -ResourceGroup 'RG-PROD','RG-NETWORK'
@@ -135,21 +148,27 @@ Multiple subscriptions are supported:
 
 ### Non-interactive collector run
 
-Version 0.1.0 supports deterministic non-interactive scope selection. Authentication must already exist before the script is started.
+Authentication must already exist and scope parameters must be supplied:
 
 ```powershell
-./Collect-AzureDocumentation.ps1 `
+./Start-AzureInfrastructureCollector.ps1 `
     -TenantId 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' `
     -SubscriptionId 'yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy' `
     -OutputPath 'C:\AzureDocs' `
     -NonInteractive
 ```
 
-`-TenantId` and `-SubscriptionId` are required in `-NonInteractive` mode.
+### Direct collector call
+
+On an already prepared workstation you can still call:
+
+```powershell
+./Collect-AzureDocumentation.ps1
+```
+
+This path does not auto-install dependencies; `Az.Accounts` and `Az.ResourceGraph` must already be available. The read-only gate still runs before Azure access.
 
 ## Output
-
-A run creates its own tenant-specific timestamped directory:
 
 ```text
 Output/
@@ -164,35 +183,11 @@ Output/
         └── collector.log
 ```
 
-### `readOnlyVerification.json`
+`Output/` is ignored by Git because exports can contain customer infrastructure information.
 
-Records the mandatory verification result that allowed the collector run to proceed, including the scanned-file count, approved Azure commands observed and detected mutation status.
+## Secret handling
 
-### `manifest.json`
-
-Contains collector/schema version, execution timestamps, account, tenant, selected subscriptions, scope, status, result counts and collected errors.
-
-### `summary.json`
-
-Contains resource/subscription counts plus grouped resource types and Azure locations.
-
-### `Inventory/resources.json`
-
-Normalized generic Azure resource inventory with these stable MVP fields:
-
-- `id`
-- `name`
-- `type`
-- `subscriptionId`
-- `resourceGroup`
-- `location`
-- `tags`
-
-### Secret handling
-
-The Core MVP queries only the inventory fields required above; resource `properties` are deliberately not exported. Additionally, sensitive-looking tag/property names such as secrets, passwords, tokens, credentials, access keys and client secrets are redacted by the normalization layer.
-
-This is a defense-in-depth measure and does not replace correct Azure RBAC and data-classification practices.
+The Core MVP exports only explicitly selected inventory fields. Full resource `properties` blocks are not exported. Sensitive-looking tag/property names such as secrets, passwords, tokens, credentials, access keys and client secrets are additionally redacted.
 
 ## Tests
 
@@ -202,31 +197,34 @@ Run all Pester tests:
 Invoke-Pester ./Tests
 ```
 
-The test suite covers core normalization/security behavior plus the read-only guard. Guard tests explicitly verify that unapproved Azure commands, dynamic execution, direct REST execution and unsafe `Set-AzContext` usage are blocked.
+The suite covers:
+
+- normalization and secret redaction,
+- PowerShell runtime validation,
+- dependency reuse and `CurrentUser` installation behavior,
+- fail-closed read-only checks,
+- self-elevation blocking,
+- Azure command allowlisting.
 
 ## Current scope of 0.1.0
 
 Implemented:
 
+- preferred non-elevating bootstrap entry point
+- automatic `CurrentUser` installation of missing `Az.Accounts` / `Az.ResourceGraph`
+- no automatic PowerShell installation
+- no self-elevation
 - mandatory fail-closed read-only verification gate
-- standalone read-only verification command
-- automatic read-only verification before collector Azure access
-- prerequisite validation
+- standalone and automatic read-only verification
 - existing-context reuse / interactive Azure login
 - tenant discovery and selection
-- subscription discovery and multi-selection
-- process-scoped Azure context selection
-- optional resource-group filtering
+- multi-subscription selection
+- optional Resource Group filtering
 - paginated Azure Resource Graph collection
-- generic resource inventory
-- resource-group inventory
+- generic resource/resource-group inventory
 - normalized JSON export
-- `readOnlyVerification.json`
-- `manifest.json`
-- `summary.json`
-- logging
-- best-effort handling of inventory query failures
-- basic secret redaction
+- verification report, manifest, summary and logging
+- defense-in-depth secret redaction
 
 Not yet implemented:
 
@@ -243,5 +241,3 @@ Not yet implemented:
 - AI documentation generation
 - diagrams, DOCX and PDF generation
 - Managed Identity / Service Principal authentication
-
-These follow the phased roadmap in `Umsetzungsplan.md`.
