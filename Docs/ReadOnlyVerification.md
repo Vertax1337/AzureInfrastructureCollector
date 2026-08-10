@@ -70,7 +70,7 @@ If PowerShell 7.2+ or PSGallery is unavailable, bootstrap fails instead of eleva
 
 ## Automatic fail-closed gate
 
-`Modules/Collector.ReadOnlyGuard.psm1` now enforces both Azure and bootstrap boundaries.
+`Modules/Collector.ReadOnlyGuard.psm1` enforces both Azure and bootstrap boundaries.
 
 It:
 
@@ -89,9 +89,17 @@ It:
 
 `Start-AzureInfrastructureCollector.ps1` runs the gate before dependency installation. `Collect-AzureDocumentation.ps1` runs it again before Azure authentication/inventory collection.
 
+## Windows PowerShell 5.1 handling
+
+The project runtime is PowerShell 7.2+ (`pwsh.exe`). Legacy Windows PowerShell 5.1 (`powershell.exe`) is not supported for the collector or the standalone verification.
+
+`Tools/Test-ReadOnlyCompliance.ps1` contains a PowerShell-5.1-compatible runtime preflight before importing the guard. If the checker is started via `powershell.exe`, it exits with code `7`, makes no Azure request and instructs the operator to rerun it using `pwsh.exe`.
+
+This prevents low-level compatibility failures such as missing .NET methods from being mistaken for a read-only verification failure.
+
 ## Tests
 
-The Pester suite now includes:
+The Pester suite includes:
 
 - current repository approval,
 - unknown Azure command blocking,
@@ -110,11 +118,20 @@ The Pester suite now includes:
 
 ## Mandatory local check before the first Azure test
 
-The manual/static review above verifies the code design and Azure command surface. Before the first real Azure connection, the local checkout must still execute the actual PowerShell parser/gate and test suite:
+The manual/static review above verifies the code design and Azure command surface. Before the first real Azure connection, the local checkout must execute the actual PowerShell parser/gate and test suite under **PowerShell 7**.
+
+From PowerShell 7:
 
 ```powershell
 ./Tools/Test-ReadOnlyCompliance.ps1
 Invoke-Pester ./Tests
+```
+
+Or explicitly from another shell:
+
+```powershell
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Test-ReadOnlyCompliance.ps1
+pwsh.exe -NoProfile -Command "Invoke-Pester .\Tests"
 ```
 
 The Azure test is permitted only if the first command reports exactly:
