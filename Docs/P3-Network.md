@@ -1,6 +1,6 @@
 # P3 – Network
 
-Status: **Started**  
+Status: **P3a validation in progress**  
 Project: `AzureInfrastructureCollector`  
 Safety boundary: **Read-only / fail closed**
 
@@ -102,6 +102,40 @@ Free-form NSG rule descriptions are deliberately not part of the initial normali
 
 The final `network.json` object passes through `Collector.ExportSecurity.psm1` before writing. Existing property-name and value-based secret filtering therefore applies to P3 and to future network extensions.
 
+The export hardening must preserve scalar and collection shape. String values must remain strings, arrays must remain arrays, and PowerShell ETS adapter metadata such as `Length`, `Count`, `SyncRoot` or array type metadata must never replace the underlying values in JSON.
+
+## First P3a real-run findings – 2026-08-10
+
+The first confirmed P3a real export completed with:
+
+- 12 Resource Groups
+- 134 Core resources
+- 22 top-level `Microsoft.Network` source resources
+- 5 VNets
+- 5 Subnets
+- 12 directed VNet Peerings
+- 4 NICs
+- 4 NSGs
+- 3 Public IPs
+- 1 Route Table with 2 routes
+- 1 Virtual Network Gateway
+- 1 Local Network Gateway
+- 1 Connection
+- 2 Network Watchers
+- 44 unique Resource-ID relationships
+- 0 collector errors
+- `READ-ONLY VERIFIED`
+
+All 22 top-level Network objects matched the corresponding 22 Core `Microsoft.Network/*` resource IDs. All 44 relationship source/target IDs resolved to either a collected top-level resource or a normalized child object; no orphan relationship was found.
+
+The real export also exposed an export-shape regression: string arrays were partially serialized through PowerShell ETS adapter properties, producing objects such as `{ "Length": 12 }` instead of the original string. Accidental nested array wrappers could similarly surface array metadata. `Collector.ExportSecurity.psm1` was corrected to process scalar values and enumerables before PSCustomObject property inspection and to flatten accidental nested enumerable wrappers. Dedicated regression tests were added.
+
+The same regression affected the presentation of `approvedAzureCommandsFound` in `readOnlyVerification.json`; the safety result itself remained `READ-ONLY VERIFIED`, but the exported command-name strings were not represented correctly. The scalar-preservation fix covers this field as well.
+
+The Local Network Gateway in the first real export had an empty `gatewayIpAddress`. P3a should additionally consider the supported `fqdn` endpoint property so an FQDN-configured on-premises gateway is not documented as endpoint-less.
+
+Because executable export-hardening code changed after this real run, this run does **not** close P3a. The next normal collector start must first pass the complete automatic Pre-Azure validation again and then produce a new real export with stable string-array values.
+
 ## P3b – Extended network services
 
 P3b is planned after P3a has passed local Pre-Azure validation and a real export review. Planned scope:
@@ -125,7 +159,9 @@ P3a is complete only when:
 3. Pester reports zero failed tests,
 4. a real Azure run completes without new Azure write operations,
 5. `network.json` is structurally stable,
-6. network counts and relationships are plausible against the Azure environment,
-7. no secret-like values are exported,
-8. VPN connection `sharedKey` is absent from query and export,
-9. the Core inventory remains unchanged except for the intended P3 additions.
+6. string arrays and empty arrays retain their intended JSON types and values,
+7. network counts and relationships are plausible against the Azure environment,
+8. no secret-like values are exported,
+9. VPN connection `sharedKey` is absent from query and export,
+10. Local Network Gateway endpoint information covers both IP- and FQDN-based configuration where present,
+11. the Core inventory remains unchanged except for the intended P3 additions.
