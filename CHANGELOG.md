@@ -44,7 +44,7 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - paginated Azure Resource Graph query helper
 - generic resource and resource-group KQL queries
 - normalized resource and resource-group JSON models
-- visible four-stage collection progress with timestamps, `Write-Progress` status during Azure Resource Graph waits, collected-object counts, JSON-write status and total run duration
+- visible collector progress with timestamps, `Write-Progress` status during Azure Resource Graph waits, collected-object counts, JSON-write status and total run duration
 - defense-in-depth redaction of sensitive-looking keys
 - value-based export redaction for signed URL/SAS signatures, account keys/shared-access-signature connection strings, private-key blocks, JWT-shaped tokens and embedded credential assignments
 - subscription-aware canonicalization of Resource Group references in resource inventory
@@ -53,6 +53,12 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - tenant-specific timestamped export structure
 - `manifest.json`, `summary.json` and collector log
 - initial Pester unit tests
+- P3a `Queries/Network.kql` with an explicit safe projection for VNets, NICs, NSGs, Public IPs, Route Tables, Virtual Network Gateways, Local Network Gateways, Connections and Network Watchers
+- P3a `Collector.Network.psm1` normalization for VNets/Subnets/Peerings, NIC/IP configurations, NSGs/custom rules, Public IPs, Route Tables/Routes and gateway/connection topology
+- explicit Resource-ID-based P3 network relationships for subnet containment, peerings, NSG/route/NAT associations, NIC/VM/subnet/Public-IP associations and gateway connections
+- `Inventory/network.json` plus nested `summary.network` output
+- six P3 network Pester tests covering query safety, topology normalization, NSG rule minimization, VPN connection secret exclusion and empty-collection stability
+- `Docs/P3-Network.md` defining the P3a/P3b architecture and safety boundary
 
 ### Fixed
 
