@@ -69,7 +69,10 @@ Write-Host ("Status: {0}" -f $readOnlyVerification.status)
 Write-Host 'No Azure authentication or Azure collection has occurred yet.'
 Write-Host ''
 
-Import-Module $bootstrapModulePath -Force -ErrorAction Stop
+# The module currently contains function names that PowerShell classifies as using
+# unapproved verbs. This is only a naming/discoverability warning, not a safety issue.
+# Suppress the warning in the normal operator path while keeping the functions unchanged.
+Import-Module $bootstrapModulePath -Force -DisableNameChecking -ErrorAction Stop
 $runtime = Test-CollectorPowerShellRuntime -MinimumVersion $minimumPowerShellVersion
 $dependencies = @(Ensure-CollectorDependencies -RequiredModules @($config.requirements.requiredModules))
 
@@ -98,15 +101,30 @@ if (-not $NonInteractive) {
             $loginParameters.Tenant = $TenantId
         }
 
-        Write-Host 'No active Azure context found. Starting interactive Azure login...'
+        # Azure PowerShell's current login UX uses ANSI decoration for labels and the
+        # device code. Force plain-text rendering only for authentication so copied logs
+        # remain human-readable. Restore the caller's rendering settings afterwards.
+        $previousOutputRendering = $PSStyle.OutputRendering
+        $previousNoColor = $env:NO_COLOR
+
         try {
-            Connect-AzAccount @loginParameters | Out-Null
+            $PSStyle.OutputRendering = [System.Management.Automation.OutputRendering]::PlainText
+            $env:NO_COLOR = '1'
+
+            Write-Host 'No active Azure context found. Starting interactive Azure login...'
+            try {
+                Connect-AzAccount @loginParameters | Out-Null
+            }
+            catch {
+                Write-Warning ("Interactive Azure login failed: {0}" -f $_.Exception.Message)
+                Write-Host 'Falling back to Azure device-code authentication...'
+                $loginParameters.UseDeviceAuthentication = $true
+                Connect-AzAccount @loginParameters | Out-Null
+            }
         }
-        catch {
-            Write-Warning ("Interactive Azure login failed: {0}" -f $_.Exception.Message)
-            Write-Host 'Falling back to Azure device-code authentication...'
-            $loginParameters.UseDeviceAuthentication = $true
-            Connect-AzAccount @loginParameters | Out-Null
+        finally {
+            $PSStyle.OutputRendering = $previousOutputRendering
+            $env:NO_COLOR = $previousNoColor
         }
 
         $existingContext = Get-AzContext -ErrorAction Stop
