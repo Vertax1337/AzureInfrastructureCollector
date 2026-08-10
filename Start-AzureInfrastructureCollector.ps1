@@ -18,6 +18,7 @@ $repositoryRoot = $PSScriptRoot
 $configPath = Join-Path $repositoryRoot 'Config/collector.config.json'
 $readOnlyGuardModulePath = Join-Path $repositoryRoot 'Modules/Collector.ReadOnlyGuard.psm1'
 $bootstrapModulePath = Join-Path $repositoryRoot 'Modules/Collector.Bootstrap.psm1'
+$preAzureValidationPath = Join-Path $repositoryRoot 'Tools/Invoke-PreAzureValidation.ps1'
 
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
     throw "Collector configuration not found: $configPath"
@@ -27,17 +28,42 @@ $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom
 $minimumPowerShellVersion = [version]$config.requirements.minimumPowerShellVersion
 
 # Minimal local runtime preflight. This intentionally happens before importing the
-# PowerShell-7-based guard so Windows PowerShell 5.1 receives a controlled message.
+# PowerShell-7-based guard so unsupported runtimes receive a controlled message.
 # It performs no Azure access and no local installation/elevation.
 if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion -lt $minimumPowerShellVersion) {
     Write-Error ("PowerShell {0} or newer (PowerShell 7) is required. Current runtime: {1} {2}. PowerShell will NOT be installed automatically and the script will NOT self-elevate." -f $minimumPowerShellVersion, $PSVersionTable.PSEdition, $PSVersionTable.PSVersion)
     exit 7
 }
 
+if (-not (Test-Path -LiteralPath $preAzureValidationPath -PathType Leaf)) {
+    throw "Mandatory pre-Azure validation script not found: $preAzureValidationPath"
+}
+
+# The normal entry point always performs the complete Azure-free validation itself.
+# No operator-side pre-command is required. Any validation failure throws and stops
+# execution before runtime dependencies, authentication, or Azure collection begin.
+Write-Host ''
+Write-Host 'AUTOMATIC PRE-AZURE VALIDATION'
+Push-Location -LiteralPath $repositoryRoot
+try {
+    $preAzureValidation = .\Tools\Invoke-PreAzureValidation.ps1 `
+        -RepositoryRoot $repositoryRoot `
+        -Embedded
+}
+finally {
+    Pop-Location
+}
+
+if (-not $preAzureValidation -or $preAzureValidation.status -ne 'READY FOR AZURE TEST') {
+    throw 'Automatic pre-Azure validation did not return READY FOR AZURE TEST. Azure execution is blocked.'
+}
+
+Write-Host 'Automatic pre-Azure validation completed successfully.'
+Write-Host ''
+
 Import-Module $readOnlyGuardModulePath -Force -ErrorAction Stop
 $readOnlyVerification = Test-CollectorReadOnlyCompliance -RepositoryRoot $repositoryRoot -ThrowOnFailure
 
-Write-Host ''
 Write-Host 'BOOTSTRAP READ-ONLY VERIFICATION'
 Write-Host ("Status: {0}" -f $readOnlyVerification.status)
 Write-Host 'No Azure authentication or Azure collection has occurred yet.'
