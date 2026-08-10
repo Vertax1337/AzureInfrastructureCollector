@@ -1,0 +1,10 @@
+# Collector output can contain customer infrastructure data.
+Output/
+
+# Local PowerShell artifacts
+*.log
+
+# Common editor/system files
+.vscode/
+.DS_Store
+Thumbs.db
