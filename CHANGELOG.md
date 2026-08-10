@@ -9,9 +9,10 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - PowerShell 7.6 LTS (`7.6.0+`) as the supported runtime baseline
 - canonical Azure-free `Tools/Invoke-PreAzureValidation.ps1` workflow
 - pre-Azure validation sequence: read-only gate -> Pester prerequisite -> Pester suite -> final read-only gate
-- automatic installation of missing Pester 5.5.0+ with `Install-Module -Scope CurrentUser`
+- exact Pester `6.0.1` validation pin via `validation.requiredPesterVersion`
+- automatic installation of exactly Pester 6.0.1 with `Install-Module -RequiredVersion 6.0.1 -Scope CurrentUser`
+- explicit isolation/import of the selected Pester module path before validation
 - explicit final `READY FOR AZURE TEST` status only after all mandatory local checks pass
-- central `validation.minimumPesterVersion` configuration
 - GitHub Actions now uses the same canonical pre-Azure validation workflow as local validation
 - preferred bootstrap entry point `Start-AzureInfrastructureCollector.ps1`
 - reusable `Collector.Bootstrap.psm1`
@@ -48,6 +49,9 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 
 ### Fixed
 
+- Pester validation no longer accepts an arbitrary newer major version; the validation runtime is deterministic at Pester 6.0.1
+- bootstrap tests migrated from removed `Assert-MockCalled` assertions to Pester 6 `Should -Invoke`, preventing legacy Pester 3.4.0 from being auto-loaded to satisfy deprecated commands
+- validation removes already-loaded Pester modules and imports the exact configured module path before running tests, preventing mixed Pester-generation command resolution
 - standalone read-only verification detects Windows PowerShell 5.1 before loading PowerShell-7-only guard code and exits with a clear `pwsh.exe` retry command instead of failing on unavailable .NET APIs such as `System.IO.Path.GetRelativePath`
-- runtime documentation and tests now consistently require the supported PowerShell 7.6 LTS baseline
+- runtime documentation and tests consistently require the supported PowerShell 7.6 LTS baseline
 - README examples explicitly distinguish `pwsh.exe` from legacy `powershell.exe`
