@@ -45,6 +45,28 @@ Describe 'Collector read-only guard' {
         @($result.violations.code) | Should -Contain 'BLOCKED_EXECUTION_PATH'
     }
 
+    It 'blocks self-elevation via Start-Process RunAs' {
+        $testRoot = Join-Path $TestDrive 'Elevation'
+        New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $testRoot 'bad.ps1') -Encoding UTF8 -Value "Start-Process pwsh -Verb RunAs"
+
+        $result = Test-CollectorReadOnlyCompliance -RepositoryRoot $testRoot
+
+        $result.verified | Should -BeFalse
+        @($result.violations.code) | Should -Contain 'BLOCKED_EXECUTION_PATH'
+    }
+
+    It 'allows local CurrentUser dependency installation code' {
+        $testRoot = Join-Path $TestDrive 'CurrentUserDependency'
+        New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $testRoot 'good.ps1') -Encoding UTF8 -Value "Install-Module Az.Accounts -Repository PSGallery -Scope CurrentUser -Force"
+
+        $result = Test-CollectorReadOnlyCompliance -RepositoryRoot $testRoot
+
+        $result.verified | Should -BeTrue
+        @($result.violations).Count | Should -Be 0
+    }
+
     It 'requires Set-AzContext to use process scope' {
         $testRoot = Join-Path $TestDrive 'ContextScope'
         New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
