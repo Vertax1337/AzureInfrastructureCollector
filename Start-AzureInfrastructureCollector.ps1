@@ -56,6 +56,43 @@ foreach ($dependency in $dependencies) {
 Write-Host 'Administrator elevation: NOT USED'
 Write-Host ''
 
+# Prepare an Azure authentication context before starting the collector. Authentication
+# changes only the local/process Az context; it does not mutate Azure resources.
+# If the normal WAM/browser flow is unavailable, fall back to Microsoft's supported
+# device-code flow. NonInteractive mode never initiates an interactive sign-in.
+if (-not $NonInteractive) {
+    $existingContext = Get-AzContext -ErrorAction SilentlyContinue
+    if (-not $existingContext -or -not $existingContext.Account -or -not $existingContext.Account.Id) {
+        $loginParameters = @{
+            Scope       = 'Process'
+            ErrorAction = 'Stop'
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
+            $loginParameters.Tenant = $TenantId
+        }
+
+        Write-Host 'No active Azure context found. Starting interactive Azure login...'
+        try {
+            Connect-AzAccount @loginParameters | Out-Null
+        }
+        catch {
+            Write-Warning ("Interactive Azure login failed: {0}" -f $_.Exception.Message)
+            Write-Host 'Falling back to Azure device-code authentication...'
+            $loginParameters.UseDeviceAuthentication = $true
+            Connect-AzAccount @loginParameters | Out-Null
+        }
+
+        $existingContext = Get-AzContext -ErrorAction Stop
+        if (-not $existingContext -or -not $existingContext.Account -or -not $existingContext.Account.Id) {
+            throw 'Azure authentication completed without a usable Azure context.'
+        }
+
+        Write-Host ("Azure authentication context ready: {0}" -f $existingContext.Account.Id)
+        Write-Host ''
+    }
+}
+
 $collectorParameters = @{
     OutputPath = $OutputPath
 }
