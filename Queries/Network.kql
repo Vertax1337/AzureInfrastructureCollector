@@ -50,6 +50,7 @@ Resources
     gatewayBgpAsn = properties.bgpSettings.asn,
     gatewayBgpPeeringAddress = tostring(properties.bgpSettings.bgpPeeringAddress),
     localGatewayIpAddress = tostring(properties.gatewayIpAddress),
+    localGatewayFqdn = tostring(properties.fqdn),
     localGatewayAddressPrefixes = properties.localNetworkAddressSpace.addressPrefixes,
     localGatewayBgpAsn = properties.bgpSettings.asn,
     localGatewayBgpPeerWeight = properties.bgpSettings.peerWeight,
