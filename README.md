@@ -8,6 +8,33 @@ Read-only PowerShell collector for repeatable, customer-neutral Azure infrastruc
 
 The authoritative project scope, architecture and safety rules are defined in [`Umsetzungsplan.md`](./Umsetzungsplan.md).
 
+## Normal operator workflow: one command
+
+Use PowerShell 7.6 LTS and start only the bootstrap entry point:
+
+```powershell
+& 'C:\Program Files\PowerShell\7\pwsh.exe' -NoProfile -ExecutionPolicy Bypass -File .\Start-AzureInfrastructureCollector.ps1
+```
+
+`Start-AzureInfrastructureCollector.ps1` performs the complete safety and prerequisite workflow automatically. A separate manual pre-validation command is **not required** for the normal collector workflow.
+
+The startup sequence is:
+
+1. verify PowerShell 7.6 LTS or newer,
+2. automatically run the Azure-free pre-Azure validation,
+3. run the initial fail-closed read-only source-code gate,
+4. verify/install exactly Pester 6.0.1 for `CurrentUser` when needed,
+5. run the complete Pester suite,
+6. run the final read-only source-code gate,
+7. require `READY FOR AZURE TEST`,
+8. verify/install `Az.Accounts` and `Az.ResourceGraph` for `CurrentUser` when needed,
+9. verify the Azure authentication context,
+10. attempt normal interactive Azure login when required,
+11. automatically fall back to device-code authentication if WAM/browser authentication fails,
+12. start `Collect-AzureDocumentation.ps1`, which runs the read-only gate again before Azure inventory collection.
+
+Any mandatory validation failure stops execution **before Azure authentication or Azure collection**.
+
 ## Runtime requirement
 
 The supported runtime baseline is **PowerShell 7.6 LTS or newer** (`pwsh.exe`, minimum `7.6.0`).
@@ -20,26 +47,11 @@ Do not use:
 
 PowerShell itself is deliberately **not installed or upgraded automatically** by this project. Installing or upgrading the runtime remains a separate workstation/admin action.
 
-## Before the first real Azure test
+## Automatic pre-Azure validation
 
-Use the dedicated Azure-free validation workflow:
+The normal bootstrap executes `Tools/Invoke-PreAzureValidation.ps1` automatically in embedded/fail-closed mode.
 
-```powershell
-pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Invoke-PreAzureValidation.ps1
-```
-
-The workflow performs, in this order:
-
-1. PowerShell 7.6 LTS runtime check,
-2. initial fail-closed read-only source-code verification,
-3. exact Pester **6.0.1** detection,
-4. automatic installation of exactly Pester 6.0.1 from `PSGallery` with `-Scope CurrentUser` if missing,
-5. isolation/import of that exact Pester module version so legacy system Pester versions cannot be mixed into the run,
-6. complete Pester test suite under `./Tests`,
-7. final fail-closed read-only source-code verification,
-8. explicit final status.
-
-A real Azure test is permitted only when the command ends with:
+A successful validation contains:
 
 ```text
 PRE-AZURE VALIDATION RESULT
@@ -51,37 +63,47 @@ Azure access performed: NO
 Administrator elevation: NOT USED
 ```
 
-The pre-Azure validation itself does **not** authenticate to Azure and does **not** run the collector.
-
-### Legacy Pester versions
-
-Windows systems can contain an old inbox/system Pester version such as 3.4.0. This does not have to be uninstalled for the collector.
-
-The validator removes already-loaded Pester modules from the current validation session and then imports the exact configured Pester 6.0.1 module path. The test suite uses Pester 6 syntax (`Should -Invoke`) and does not use the removed `Assert-MockCalled` command, preventing PowerShell from auto-loading an old Pester module to satisfy that legacy command.
-
-## Recommended collector entry point
-
-After successful pre-Azure validation:
+The standalone validator remains available for diagnostics and CI:
 
 ```powershell
-pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-AzureInfrastructureCollector.ps1
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Invoke-PreAzureValidation.ps1
 ```
 
-The bootstrap:
+It is not a prerequisite command the operator has to remember before every normal run.
 
-1. verifies PowerShell 7.6 LTS or newer,
-2. runs the mandatory local read-only source-code gate,
-3. checks `Az.Accounts` and `Az.ResourceGraph`,
-4. installs a missing required module from `PSGallery` with `-Scope CurrentUser`,
-5. verifies that every required module can be imported,
-6. starts `Collect-AzureDocumentation.ps1`,
-7. the collector runs the read-only gate again before Azure access.
+### Pester isolation
+
+The validator requires exactly **Pester 6.0.1**.
+
+Windows can contain an old inbox/system Pester version such as 3.4.0. It does not have to be removed. The validator removes already-loaded Pester modules from its current validation session, imports the exact configured Pester 6.0.1 module path and verifies the required Pester commands before executing the suite.
+
+## Azure authentication
+
+If an active Az context already exists, it is reused.
+
+Otherwise the interactive workflow first attempts:
+
+```powershell
+Connect-AzAccount -Scope Process
+```
+
+If WAM/browser authentication fails, the bootstrap automatically retries with device-code authentication:
+
+```powershell
+Connect-AzAccount -UseDeviceAuthentication -Scope Process
+```
+
+When `-TenantId` is supplied to the bootstrap, the tenant is also supplied during authentication.
+
+The Azure login output is temporarily forced to plain-text rendering so copied device-code/login messages do not contain raw ANSI escape sequences. The previous PowerShell rendering settings are restored immediately after authentication.
+
+`-NonInteractive` never initiates an interactive sign-in; an existing Azure authentication context is required.
 
 ## Administrator rights and elevation
 
-**Local Windows administrator rights are not required for the normal collector or pre-Azure validation workflow.**
+**Local Windows administrator rights are not required for the normal collector workflow.**
 
-Missing runtime Az modules and Pester are installed only in the current user's PowerShell module path:
+Missing PowerShell modules are installed only in the current user's module path:
 
 ```powershell
 Install-Module <Module> -Repository PSGallery -Scope CurrentUser
@@ -96,11 +118,11 @@ The project deliberately does **not**:
 - automatically install or upgrade PowerShell,
 - automatically register or modify `PSGallery`.
 
-Azure RBAC permissions are separate from local Windows administrator rights. The Azure identity still needs sufficient read permissions for the selected tenant/subscriptions.
+Azure RBAC permissions are separate from local Windows administrator rights. The Azure identity needs sufficient read permissions for the selected tenant/subscriptions.
 
 ## Standalone read-only verification
 
-For a source-code-only safety check without running Pester:
+For a source-code-only safety check without running the complete validation workflow:
 
 ```powershell
 pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Test-ReadOnlyCompliance.ps1
@@ -149,7 +171,9 @@ Runtime:
 - `Az.ResourceGraph`
 - Azure identity with read access to the target scope
 
-Pre-Azure validation uses exactly **Pester 6.0.1**, configured as `validation.requiredPesterVersion` in `Config/collector.config.json`. `Invoke-PreAzureValidation.ps1` installs this exact version automatically for `CurrentUser` when missing.
+Validation:
+
+- exact Pester 6.0.1, automatically installed for `CurrentUser` when missing
 
 ## Usage
 
@@ -204,8 +228,9 @@ The Core MVP exports only explicitly selected inventory fields. Full resource `p
 
 Implemented:
 
+- one-command normal operator workflow
+- automatic embedded pre-Azure validation before every normal collector run
 - PowerShell 7.6 LTS runtime baseline
-- dedicated Azure-free pre-Azure validation
 - deterministic Pester 6.0.1 validation runtime
 - Pester 6-compatible test assertions
 - automatic `CurrentUser` installation of the pinned Pester validation version
@@ -217,6 +242,8 @@ Implemented:
 - no self-elevation
 - mandatory fail-closed read-only verification gate
 - existing-context reuse / interactive Azure login
+- automatic device-code fallback
+- plain-text Azure login rendering
 - tenant discovery and selection
 - multi-subscription selection
 - optional Resource Group filtering
