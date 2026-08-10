@@ -19,6 +19,14 @@ Local writes: approved CurrentUser dependency installation plus collector export
 Self-elevation: NONE
 ```
 
+## Runtime baseline
+
+The supported runtime baseline is **PowerShell 7.6 LTS or newer**, minimum `7.6.0`.
+
+PowerShell 7.2 is no longer accepted as an approved runtime because it is out of Microsoft support. PowerShell 6.x and Windows PowerShell 5.1 are also unsupported for this project.
+
+PowerShell itself is not installed or upgraded by the collector or validation scripts.
+
 ## Reviewed Azure command surface
 
 The executable collector scope uses only:
@@ -48,7 +56,7 @@ Neither query mutates Azure state.
 
 Approved local behavior:
 
-- verify PowerShell 7.2+,
+- verify PowerShell 7.6 LTS+,
 - verify the repository read-only state,
 - inspect installed PowerShell modules,
 - query the already registered `PSGallery`,
@@ -61,12 +69,12 @@ Explicitly not implemented:
 - `Start-Process -Verb RunAs`,
 - any other self-elevation path,
 - `Install-Module -Scope AllUsers`,
-- automatic PowerShell 7 installation/update,
+- automatic PowerShell installation/update,
 - automatic PowerShell repository registration/change,
 - Azure CLI execution,
 - direct REST/web Azure calls.
 
-If PowerShell 7.2+ or PSGallery is unavailable, bootstrap fails instead of elevating or changing workstation-wide configuration.
+If PowerShell 7.6 LTS+ or PSGallery is unavailable, bootstrap fails instead of elevating or changing workstation-wide configuration.
 
 ## Mandatory pre-Azure validation
 
@@ -74,7 +82,7 @@ If PowerShell 7.2+ or PSGallery is unavailable, bootstrap fails instead of eleva
 
 It performs:
 
-1. PowerShell 7.2+ runtime validation,
+1. PowerShell 7.6 LTS runtime validation,
 2. initial `READ-ONLY VERIFIED` source-code gate,
 3. Pester 5.5.0+ discovery,
 4. if necessary, Pester installation from the already registered `PSGallery` with literal `-Scope CurrentUser`,
@@ -84,8 +92,6 @@ It performs:
 8. final `READY FOR AZURE TEST` status only if every mandatory check succeeded.
 
 The validation workflow does not call `Connect-AzAccount`, `Search-AzGraph`, or any other Azure operation. It performs no Azure authentication and no Azure request.
-
-Pester remains a validation/development dependency and is not required for a normal collector run after validation. Its minimum version is defined in `Config/collector.config.json` as `validation.minimumPesterVersion`.
 
 ## Automatic fail-closed gate
 
@@ -108,15 +114,9 @@ It:
 
 `Invoke-PreAzureValidation.ps1` runs the gate before and after Pester. `Start-AzureInfrastructureCollector.ps1` runs the gate before runtime dependency installation. `Collect-AzureDocumentation.ps1` runs it again before Azure authentication/inventory collection.
 
-## Windows PowerShell 5.1 handling
-
-The project runtime is PowerShell 7.2+ (`pwsh.exe`). Legacy Windows PowerShell 5.1 (`powershell.exe`) is not supported for the collector or validation tools.
-
-Both validation entry points contain a PowerShell-5.1-compatible runtime preflight before importing the guard. If started via `powershell.exe`, they exit without making any Azure request and instruct the operator to rerun using `pwsh.exe`.
-
 ## Tests
 
-The Pester suite includes:
+The Pester suite covers:
 
 - current repository approval,
 - unknown Azure command blocking,
@@ -127,21 +127,13 @@ The Pester suite includes:
 - `Install-Module -Scope AllUsers` blocking,
 - PowerShell repository mutation blocking,
 - `Set-AzContext -Scope Process` enforcement,
-- bootstrap runtime validation,
+- PowerShell 7.6 LTS runtime validation,
 - dependency reuse,
 - missing dependency installation in `CurrentUser` scope.
 
 `.github/workflows/read-only-gate.yml` invokes the same canonical `Tools/Invoke-PreAzureValidation.ps1` used locally. The workflow repository permission remains restricted to `contents: read`.
 
 ## Mandatory command before the first real Azure test
-
-From PowerShell 7:
-
-```powershell
-./Tools/Invoke-PreAzureValidation.ps1
-```
-
-Or explicitly from another shell:
 
 ```powershell
 pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\Invoke-PreAzureValidation.ps1
