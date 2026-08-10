@@ -120,7 +120,18 @@ finally {
     Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
 }
 
-$resourceGroupFilter = @(Select-CollectorResourceGroups -ResourceGroups $resourceGroups -RequestedResourceGroup $ResourceGroup -NonInteractive:$NonInteractive)
+# Default collector behavior is full selected-subscription inventory. Resource-group
+# filtering is opt-in via -ResourceGroup; the normal run must never pause on a hidden
+# Read-Host prompt after Resource Group discovery.
+if ($ResourceGroup -and $ResourceGroup.Count -gt 0) {
+    $resourceGroupFilter = @(Select-CollectorResourceGroups -ResourceGroups $resourceGroups -RequestedResourceGroup $ResourceGroup -NonInteractive:$NonInteractive)
+}
+else {
+    $resourceGroupFilter = @()
+    Write-Host ("[{0}]       Resource Group scope: ALL ({1})" -f (Get-Date).ToString('HH:mm:ss'), $resourceGroups.Count)
+    Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Resource-group scope: all discovered groups ({0}); no filter requested." -f $resourceGroups.Count)
+}
+
 if ($resourceGroupFilter.Count -gt 0) {
     $resourceGroups = @($resourceGroups | Where-Object { $resourceGroupFilter -contains $_.name })
     Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Resource-group filter active: {0}" -f ($resourceGroupFilter -join ', '))
