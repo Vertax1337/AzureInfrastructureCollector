@@ -18,6 +18,7 @@ $startedAt = Get-Date
 $scriptRoot = $PSScriptRoot
 $readOnlyGuardModulePath = Join-Path $scriptRoot 'Modules/Collector.ReadOnlyGuard.psm1'
 $coreModulePath = Join-Path $scriptRoot 'Modules/Collector.Core.psm1'
+$exportSecurityModulePath = Join-Path $scriptRoot 'Modules/Collector.ExportSecurity.psm1'
 $configPath = Join-Path $scriptRoot 'Config/collector.config.json'
 $resourcesQueryPath = Join-Path $scriptRoot 'Queries/Resources.kql'
 $resourceGroupsQueryPath = Join-Path $scriptRoot 'Queries/ResourceGroups.kql'
@@ -55,6 +56,7 @@ Write-Host ("Data-plane write operations: {0}" -f $readOnlyVerification.dataPlan
 Write-Host ''
 
 Import-Module $coreModulePath -Force -ErrorAction Stop
+Import-Module $exportSecurityModulePath -Force -ErrorAction Stop
 
 $config = Get-CollectorConfig -Path $configPath
 $prerequisites = Test-CollectorPrerequisites -MinimumPowerShellVersion ([version]$config.requirements.minimumPowerShellVersion) -RequiredModules @($config.requirements.requiredModules)
@@ -87,10 +89,16 @@ Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Tenant '{0}' ({1});
 $subscriptionIds = @($selectedSubscriptions | ForEach-Object { [string]$_.Id })
 $pageSize = [int]$config.resourceGraph.pageSize
 $sensitivePattern = [string]$config.security.sensitivePropertyPattern
+$sensitiveValuePatterns = @($config.security.sensitiveValuePatterns | ForEach-Object { [string]$_ })
 $jsonDepth = [int]$config.export.jsonDepth
 $totalStages = 4
 
-Export-CollectorJson -InputObject $readOnlyVerification -Path (Join-Path $run.rootPath 'readOnlyVerification.json') -Depth $jsonDepth
+$publicReadOnlyVerification = New-CollectorPublicReadOnlyVerification -Verification $readOnlyVerification
+$publicReadOnlyVerification = Protect-CollectorExportValue `
+    -Value $publicReadOnlyVerification `
+    -SensitivePropertyPattern $sensitivePattern `
+    -SensitiveValuePatterns $sensitiveValuePatterns
+Export-CollectorJson -InputObject $publicReadOnlyVerification -Path (Join-Path $run.rootPath 'readOnlyVerification.json') -Depth $jsonDepth
 
 $resourceGroups = @()
 Write-CollectorStage -Step 1 -Total $totalStages -Message 'Collecting Resource Groups from Azure Resource Graph...'
@@ -102,6 +110,12 @@ try {
     $resourceGroups = @(
         $resourceGroupRows |
             ConvertTo-CollectorResourceGroup -SensitivePropertyPattern $sensitivePattern |
+            ForEach-Object {
+                Protect-CollectorExportValue `
+                    -Value $_ `
+                    -SensitivePropertyPattern $sensitivePattern `
+                    -SensitiveValuePatterns $sensitiveValuePatterns
+            } |
             Sort-Object subscriptionId, name
     )
     Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Collected {0} resource groups." -f $resourceGroups.Count)
@@ -148,11 +162,23 @@ try {
     $resources = @(
         $resourceRows |
             ConvertTo-CollectorResource -SensitivePropertyPattern $sensitivePattern |
-            Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup } |
+            ForEach-Object {
+                Protect-CollectorExportValue `
+                    -Value $_ `
+                    -SensitivePropertyPattern $sensitivePattern `
+                    -SensitiveValuePatterns $sensitiveValuePatterns
+            } |
+            Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup }
+    )
+
+    $resources = @(
+        Resolve-CollectorResourceGroupReferences -Resources $resources -ResourceGroups $resourceGroups |
             Sort-Object subscriptionId, type, resourceGroup, name, id
     )
-    Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Collected {0} resources." -f $resources.Count)
+
+    Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Collected {0} resources; Resource Group references canonicalized against ResourceGroups inventory." -f $resources.Count)
     Write-Host ("[{0}]       Resources collected: {1}" -f (Get-Date).ToString('HH:mm:ss'), $resources.Count)
+    Write-Host ("[{0}]       Resource Group references: CANONICALIZED" -f (Get-Date).ToString('HH:mm:ss'))
 }
 catch {
     $errorItem = [pscustomobject][ordered]@{
@@ -177,12 +203,21 @@ Write-Host ("[{0}]       Inventory JSON written." -f (Get-Date).ToString('HH:mm:
 Write-CollectorStage -Step 4 -Total $totalStages -Message 'Building summary and manifest...'
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Building summary.json...'
 $summary = New-CollectorSummary -Resources @($resources) -ResourceGroups @($resourceGroups) -Subscriptions @($selectedSubscriptions) -ResourceGroupFilter $resourceGroupFilter
+$summary = Protect-CollectorExportValue `
+    -Value $summary `
+    -SensitivePropertyPattern $sensitivePattern `
+    -SensitiveValuePatterns $sensitiveValuePatterns
 Export-CollectorJson -InputObject $summary -Path (Join-Path $run.rootPath 'summary.json') -Depth $jsonDepth
 
 $completedAt = Get-Date
 $status = if ($errors.Count -eq 0) { 'Success' } elseif ($resources.Count -gt 0 -or $resourceGroups.Count -gt 0) { 'PartialSuccess' } else { 'Failed' }
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Building manifest.json...'
 $manifest = New-CollectorManifest -Config $config -Tenant $tenant -Subscriptions @($selectedSubscriptions) -AzureContext $azureContext -StartedAt $startedAt -CompletedAt $completedAt -Status $status -Summary $summary -Errors @($errors) -ResourceGroupFilter $resourceGroupFilter
+$manifest = New-CollectorPublicManifest -Manifest $manifest
+$manifest = Protect-CollectorExportValue `
+    -Value $manifest `
+    -SensitivePropertyPattern $sensitivePattern `
+    -SensitiveValuePatterns $sensitiveValuePatterns
 Export-CollectorJson -InputObject $manifest -Path (Join-Path $run.rootPath 'manifest.json') -Depth $jsonDepth
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
 
