@@ -76,13 +76,23 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - `Inventory/compute.json` plus nested `summary.compute` output and a dedicated sixth collector stage for Compute
 - six dedicated P4 Pester tests covering query safety, VM normalization, disk/availability topology, unmanaged VHD/image URI minimization, encryption-reference minimization and empty-collection stability
 - `Docs/P4-Compute.md` defining P4 scope, safety/data-minimization boundary, power-state semantics and validation gates
-- P5 `Queries/AVD.kql` using Azure Resource Graph `Resources` for top-level AVD resources and `DesktopVirtualizationResources` for Session Hosts
+- P5 split Azure Resource Graph queries: `Resources` for top-level AVD resources and `DesktopVirtualizationResources` for Session Hosts
 - P5 `Collector.AVD.psm1` normalization for Workspaces, Host Pools, Application Groups, Session Hosts and Scaling Plans
 - explicit P5 Resource-ID relationships for Workspace -> Application Group, Application Group -> Host Pool, Host Pool -> Session Host, Session Host -> P4 VM and Scaling Plan -> Host Pool
 - P5 `Inventory/avd.json` plus nested `summary.avd` output and a dedicated seventh collector stage for Azure Virtual Desktop
-- seven dedicated P5 Pester tests covering query safety, Workspace, Host Pool, Application Group, Session Host, Scaling Plan and empty-collection stability
+- P5 query-split and DateTime regression coverage in addition to the AVD normalization tests
 - P5 data-minimization boundary excluding registration tokens, SSO secret paths, VM templates, raw custom RDP properties, assigned users, user sessions, health/update error details, published application command/file paths and scaling-plan notification free text
 - `Docs/P5-AVD.md` defining P5 scope, Resource Graph table usage, relationships, safety/PII boundary and validation gates
+- P6 separate Resource Graph queries for Storage Accounts, Key Vaults, Backup Vaults and `RecoveryServicesResources` backup metadata
+- P6 `Collector.Storage.psm1`, `Collector.Backup.psm1` and `Collector.KeyVault.psm1` normalization modules
+- P6 Resource-ID relationships for Storage/Key-Vault subnet ACLs and Backup Vault/Policy/Protected-Resource topology
+- separate P6 exports `Inventory/storage.json`, `Inventory/backup.json` and `Inventory/keyVault.json` plus `summary.storage`, `summary.backup` and `summary.keyVault`
+- P6 Storage safety boundary excluding account keys, SAS tokens, connection strings and CMK key URIs
+- P6 Backup safety boundary excluding datasource credentials, secret-store values, CMK key URIs, restore requests and raw policy/protected-item property trees
+- P6 Key Vault safety boundary excluding access policies/object IDs and all Key/Secret/Certificate data-plane objects or values
+- local invariant UTC/ISO-8601 normalization for P6 Backup recovery-point timestamps
+- P6 unit/regression tests for query separation, secret boundaries, Storage/Key-Vault network metadata, Recovery Services/Data Protection relationships, array stability and empty collections
+- `Docs/P6-Storage-Backup-KeyVault.md` defining P6 scope, Resource Graph architecture, relationships, export schemas and security boundaries
 
 ### Fixed
 
@@ -104,3 +114,6 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - standalone read-only verification detects Windows PowerShell 5.1 before loading PowerShell-7-only guard code and exits with a clear `pwsh.exe` retry command instead of failing on unavailable .NET APIs such as `System.IO.Path.GetRelativePath`
 - runtime documentation and tests consistently require the supported PowerShell 7.6 LTS baseline
 - README examples explicitly distinguish `pwsh.exe` from legacy `powershell.exe`
+- P5 AVD no longer uses an unsupported cross-table `union`; `Resources` and `DesktopVirtualizationResources` are queried separately and combined locally
+- P5 Session Host DateTime values are normalized locally to invariant UTC/ISO-8601 after ARG `todatetime()` projection, avoiding locale-dependent export strings and unsupported ARG formatting
+- P6 Recovery Services policy `dataSourceTypes` remains a stable array even when exactly one backup-management type is returned
