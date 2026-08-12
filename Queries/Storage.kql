@@ -1,0 +1,30 @@
+Resources
+| where type =~ 'microsoft.storage/storageaccounts'
+| project
+    id,
+    name,
+    type,
+    resourceGroup,
+    subscriptionId,
+    location,
+    tags,
+    kind,
+    skuName = tostring(sku.name),
+    skuTier = tostring(sku.tier),
+    accessTier = tostring(properties.accessTier),
+    allowBlobPublicAccess = properties.allowBlobPublicAccess,
+    allowSharedKeyAccess = properties.allowSharedKeyAccess,
+    defaultToOAuthAuthentication = properties.defaultToOAuthAuthentication,
+    isHnsEnabled = properties.isHnsEnabled,
+    isNfsV3Enabled = properties.isNfsV3Enabled,
+    isSftpEnabled = properties.isSftpEnabled,
+    isLocalUserEnabled = properties.isLocalUserEnabled,
+    minimumTlsVersion = tostring(properties.minimumTlsVersion),
+    publicNetworkAccess = tostring(properties.publicNetworkAccess),
+    supportsHttpsTrafficOnly = properties.supportsHttpsTrafficOnly,
+    largeFileSharesState = tostring(properties.largeFileSharesState),
+    networkDefaultAction = tostring(properties.networkAcls.defaultAction),
+    networkBypass = tostring(properties.networkAcls.bypass),
+    networkVirtualNetworkRules = properties.networkAcls.virtualNetworkRules,
+    networkIpRules = properties.networkAcls.ipRules
+| order by subscriptionId asc, resourceGroup asc, name asc, id asc
