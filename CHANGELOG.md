@@ -70,6 +70,12 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - P3b Azure Firewall/Firewall Policy topology for SKU, threat-intelligence mode, policy/virtual-hub/subnet/Public-IP references without Firewall rule bodies
 - eight dedicated P3b Pester tests covering query safety, Private Link, Private DNS, NAT, Load Balancer, Application Gateway, Azure Firewall/Policy and empty-collection stability
 - `Docs/P3-Network.md` defining the P3a/P3b architecture, safety boundary, relationships and validation gates
+- P4 `Queries/Compute.kql` with explicit Resource Graph projections for Virtual Machines, Managed Disks and Availability Sets
+- P4 `Collector.Compute.psm1` normalization for VM size/image/availability/power-state snapshot, NIC references, OS/Data Disks, Managed Disks and Availability Sets
+- explicit P4 Resource-ID relationships between VMs, NICs, OS/Data Disks, Availability Sets, Managed-By resources and Proximity Placement Groups
+- `Inventory/compute.json` plus nested `summary.compute` output and a dedicated sixth collector stage for Compute
+- six dedicated P4 Pester tests covering query safety, VM normalization, disk/availability topology, unmanaged VHD/image URI minimization, encryption-reference minimization and empty-collection stability
+- `Docs/P4-Compute.md` defining P4 scope, safety/data-minimization boundary, power-state semantics and validation gates
 
 ### Fixed
 
