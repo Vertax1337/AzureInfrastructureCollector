@@ -1,0 +1,35 @@
+RecoveryServicesResources
+| where type in~ (
+    'microsoft.recoveryservices/vaults/backuppolicies',
+    'microsoft.recoveryservices/vaults/backupfabrics/protectioncontainers/protecteditems',
+    'microsoft.dataprotection/backupvaults/backuppolicies',
+    'microsoft.dataprotection/backupvaults/backupinstances'
+)
+| project
+    id,
+    name,
+    type,
+    resourceGroup,
+    subscriptionId,
+    recoveryBackupManagementType = tostring(properties.backupManagementType),
+    recoveryProtectedItemsCount = properties.protectedItemsCount,
+    recoveryScheduleRunFrequency = tostring(properties.schedulePolicy.scheduleRunFrequency),
+    recoveryRetentionPolicyType = tostring(properties.retentionPolicy.retentionPolicyType),
+    recoveryFriendlyName = tostring(properties.friendlyName),
+    recoverySourceResourceId = tostring(properties.sourceResourceId),
+    recoveryPolicyId = tostring(properties.policyId),
+    recoveryPolicyName = tostring(properties.policyName),
+    recoveryWorkloadType = tostring(properties.workloadType),
+    recoveryProtectionState = tostring(properties.currentProtectionState),
+    recoveryLastRecoveryPoint = todatetime(properties.lastRecoveryPoint),
+    dataProtectionDatasourceTypes = properties.datasourceTypes,
+    dataProtectionPolicyObjectType = tostring(properties.objectType),
+    dataProtectionFriendlyName = tostring(properties.friendlyName),
+    dataProtectionSourceResourceId = tostring(properties.dataSourceInfo.resourceID),
+    dataProtectionSourceResourceLocation = tostring(properties.dataSourceInfo.resourceLocation),
+    dataProtectionDatasourceType = tostring(properties.dataSourceInfo.datasourceType),
+    dataProtectionPolicyId = tostring(properties.policyInfo.policyId),
+    dataProtectionPolicyName = tostring(properties.policyInfo.name),
+    dataProtectionProtectionState = tostring(properties.currentProtectionState),
+    dataProtectionLastRecoveryPoint = todatetime(properties.lastRecoveryPoint)
+| order by subscriptionId asc, resourceGroup asc, type asc, name asc, id asc
