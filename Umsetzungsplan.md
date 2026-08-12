@@ -819,10 +819,13 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 - [x] P4 als Phase 4 von 6 in sichtbare Collector-Ausgabe und Fehler-/PartialSuccess-Pfad integriert
 - [x] sechs dedizierte P4-Unit-/Regressionstests für Query-Safety, VM, Disk, Availability Set, sensitive URI/Encryption-Minimierung und leere Arrays ergänzt
 - [x] statische Read-only-Gegenprüfung: kein neues Azure-Cmdlet, kein REST-/CLI-/SDK-Pfad; bestehender `Invoke-CollectorResourceGraph`/`Search-AzGraph`-Pfad wird wiederverwendet
-- [ ] automatische Pre-Azure-Validierung des finalen P4-Stands erfolgreich (`READ-ONLY VERIFIED`, 0 Testfehler, `READY FOR AZURE TEST`)
-- [ ] erster P4-Real-Export erzeugt und `compute.json` auf Core-Abgleich, Relationships, Orphans, Schema-/Array-Stabilität und Secret Leakage geprüft
+- [x] automatische Pre-Azure-Validierung des finalen P4-Stands erfolgreich: PowerShell 7.6.4, Pester 6.0.1, 9 Testdateien, 52/52 Tests, beide Gates `READ-ONLY VERIFIED`, `READY FOR AZURE TEST`, vor Freigabe `Azure access performed: NO`, keine Administrator-Elevation
+- [x] P4-Real-Export 2026-08-12 erfolgreich: 12 RG, 134 Core-Ressourcen, 11 Compute-Quellressourcen, 4 VMs, 7 Managed Disks, 0 Availability Sets, 18 Compute-Relationships, 0 Collector-Fehler, `Success`
+- [x] `compute.json` fachlich/strukturell geprüft: P4-Scope 1:1 gegen Core, 4 NIC-/4 OS-Disk-/3 Data-Disk-Referenzen konsistent, alle 7 `managedByResourceId` korrekt, 0 doppelte Relationships, 0 Orphan-Quellen/-Ziele, 4/4 Power-State-Snapshots
+- [x] P4-Export-Härtung bestätigt: stabile Arrays, keine PowerShell-Adapter-Artefakte, keine RG-Casing-Abweichungen und keine Treffer für `osProfile`, Admin-/Password-/SSH-/UserData-/ProtectedSettings-Inhalte, Boot-Diagnostics-URIs, Secret-/Key-URLs, `encryptionSettingsCollection`, Private-Key-/SAS-/Account-Key-/JWT-/Credential-Muster oder nicht freigegebene URI-/Encryption-Detailwerte
+- [x] P3-Rückwärtskompatibilität im P4-Real-Export bestätigt: `resourceGroups.json`, `resources.json` und `network.json` gegenüber dem unmittelbar vorherigen P3b-Export inhaltlich unverändert
 
-> **P4 ist implementiert, aber noch nicht real validiert. Durch die P4-Codeänderungen ist die vorherige P3b-Laufzeitfreigabe für den aktuellen ausführbaren Stand nicht mehr ausreichend. Vor dem ersten P4-Azure-Lauf muss die automatische Pre-Azure-Validierung erneut erfolgreich sein.**
+> **P4 Compute ist für den aktuellen Entwicklungsstand abgeschlossen. Weitere heterogene Compute-Szenarien, insbesondere positive Availability-Set-/Zone-/Gallery-Sonderfälle, bleiben Bestandteil der späteren P10-Integrationstests und blockieren P5 nicht.**
 
 ## P5 – AVD
 - [ ] AVD-Struktur und VM-Beziehungen
@@ -840,7 +843,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 - [ ] vereinheitlichtes Relationship-Schema
 
 ## P10 – Qualitätssicherung / Härtung
-- [ ] Integrationstests in heterogenen Testumgebungen, insbesondere positive Real-Azure-Abdeckung für P3b-Ressourcentypen
+- [ ] Integrationstests in heterogenen Testumgebungen, insbesondere positive Real-Azure-Abdeckung für P3b-Ressourcentypen sowie zusätzliche Compute-Szenarien wie Availability Sets/Zones/Gallery-Varianten
 - [ ] Reader-Rechte / fehlende Berechtigungen
 - [ ] weitergehende Secret Leakage Tests mit späteren Detailmodulen
 - [ ] JSON Schema Validation
@@ -932,7 +935,7 @@ P10  Tests / Härtung
 P11  Release 1.0
 ```
 
-**Aktueller nächster Schritt:** P4 Compute ist implementiert, aber noch nicht real validiert. Der aktuelle `main` muss über den normalen Ein-Befehl-Start die automatische Pre-Azure-Validierung bestehen. Auf Basis des bisherigen 46-Test-Stands plus sechs neuer P4-Tests werden **voraussichtlich 9 Testdateien / 52 Tests** erwartet; diese Zahl ist erst nach dem lokalen Lauf bestätigt. Nur bei `Failed: 0`, beiden Gates `READ-ONLY VERIFIED` und `READY FOR AZURE TEST` darf der anschließende P4-Real-Run stattfinden. Danach wird `compute.json` gegen das Core-Inventar auf VM-/Disk-/Availability-Counts, NIC-/OS-Disk-/Data-Disk-Relationships, Orphans, Power-State-Abdeckung, RG-Casing, Array-/Schema-Stabilität und Secret-/URI-Leakage geprüft. Erst danach gilt P4 als abgeschlossen und P5 AVD wird begonnen.
+**Aktueller nächster Schritt:** P4 Compute ist abgeschlossen. Als nächster Entwicklungsblock wird P5 AVD umgesetzt. Dabei werden Workspaces, Host Pools, Application Groups, Session Hosts, relevante Host-Pool-/AVD-Einstellungen, Start VM on Connect, Scaling Plans sowie Resource-ID-basierte Beziehungen insbesondere zwischen Session Hosts und den bereits normalisierten P4-VMs kundengenerisch und ausschließlich lesend erfasst. Vor dem ersten P5-Real-Run muss der dann aktuelle ausführbare Stand erneut automatisch `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` erreichen.
 
 ---
 
