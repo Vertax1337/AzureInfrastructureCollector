@@ -1,0 +1,30 @@
+Resources
+| where type in~ (
+    'microsoft.recoveryservices/vaults',
+    'microsoft.dataprotection/backupvaults'
+)
+| project
+    id,
+    name,
+    type,
+    resourceGroup,
+    subscriptionId,
+    location,
+    tags,
+    skuName = tostring(sku.name),
+    skuTier = tostring(sku.tier),
+    recoveryPublicNetworkAccess = tostring(properties.publicNetworkAccess),
+    recoveryStandardTierStorageRedundancy = tostring(properties.redundancySettings.standardTierStorageRedundancy),
+    recoveryCrossRegionRestore = tostring(properties.redundancySettings.crossRegionRestore),
+    recoveryCrossSubscriptionRestoreState = tostring(properties.restoreSettings.crossSubscriptionRestoreSettings.crossSubscriptionRestoreState),
+    recoverySoftDeleteState = tostring(properties.securitySettings.softDeleteSettings.softDeleteState),
+    recoverySoftDeleteRetentionDays = properties.securitySettings.softDeleteSettings.softDeleteRetentionPeriodInDays,
+    recoveryEnhancedSecurityState = tostring(properties.securitySettings.softDeleteSettings.enhancedSecurityState),
+    recoveryImmutabilityState = tostring(properties.securitySettings.immutabilitySettings.state),
+    backupVaultStorageSettings = properties.storageSettings,
+    backupVaultSoftDeleteState = tostring(properties.securitySettings.softDeleteSettings.state),
+    backupVaultSoftDeleteRetentionDays = properties.securitySettings.softDeleteSettings.retentionDurationInDays,
+    backupVaultImmutabilityState = tostring(properties.securitySettings.immutabilitySettings.state),
+    backupVaultCrossRegionRestoreState = tostring(properties.featureSettings.crossRegionRestoreSettings.state),
+    backupVaultCrossSubscriptionRestoreState = tostring(properties.featureSettings.crossSubscriptionRestoreSettings.state)
+| order by subscriptionId asc, resourceGroup asc, type asc, name asc, id asc
