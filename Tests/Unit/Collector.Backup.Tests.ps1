@@ -53,6 +53,8 @@ Describe 'P6 Recovery Services normalization' {
         $result.summary.backupPolicies | Should -Be 1
         $result.summary.recoveryProtectedItems | Should -Be 1
         $result.backupPolicies[0].vaultId | Should -BeExactly $vaultId
+        ($result.backupPolicies[0].dataSourceTypes -is [System.Array]) | Should -BeTrue
+        @($result.backupPolicies[0].dataSourceTypes).Count | Should -Be 1
         $result.recoveryProtectedItems[0].lastRecoveryPoint | Should -BeExactly '2026-08-12T12:34:56.0000000Z'
         @($result.relationships | Where-Object { $_.sourceId -eq $itemId -and $_.relationship -eq 'ProtectsResource' -and $_.targetId -eq $vmId }).Count | Should -Be 1
         @($result.relationships | Where-Object { $_.sourceId -eq $itemId -and $_.relationship -eq 'UsesBackupPolicy' -and $_.targetId -eq $policyId }).Count | Should -Be 1
@@ -91,6 +93,7 @@ Describe 'P6 Data Protection normalization' {
         $result.summary.backupVaults | Should -Be 1
         $result.summary.dataProtectionBackupInstances | Should -Be 1
         $vault.storageSettings[0].redundancy | Should -BeExactly 'GeoRedundant'
+        ($result.backupPolicies[0].dataSourceTypes -is [System.Array]) | Should -BeTrue
         @($result.backupPolicies[0].dataSourceTypes).Count | Should -Be 1
         $backupInstance.lastRecoveryPoint | Should -BeExactly '2026-08-12T11:00:00.0000000Z'
         @($backupInstance.PSObject.Properties.Name) | Should -Not -Contain 'datasourceAuthCredentials'
