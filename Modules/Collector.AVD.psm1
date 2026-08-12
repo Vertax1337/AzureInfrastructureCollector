@@ -47,6 +47,46 @@ function ConvertTo-CollectorAvdStringArray {
     ) | Sort-Object -Unique
 }
 
+function ConvertTo-CollectorAvdIso8601Utc {
+    [CmdletBinding()]
+    param($Value)
+
+    if ($null -eq $Value) {
+        return ''
+    }
+
+    $utcDateTime = $null
+
+    if ($Value -is [datetimeoffset]) {
+        $utcDateTime = ([datetimeoffset]$Value).UtcDateTime
+    }
+    elseif ($Value -is [datetime]) {
+        $dateTimeValue = [datetime]$Value
+        if ($dateTimeValue.Kind -eq [System.DateTimeKind]::Unspecified) {
+            $utcDateTime = [datetime]::SpecifyKind($dateTimeValue, [System.DateTimeKind]::Utc)
+        }
+        else {
+            $utcDateTime = $dateTimeValue.ToUniversalTime()
+        }
+    }
+    else {
+        $text = [string]$Value
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            return ''
+        }
+
+        $parsed = [datetimeoffset]::MinValue
+        $styles = [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal
+        if (-not [datetimeoffset]::TryParse($text, [System.Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$parsed)) {
+            return ''
+        }
+
+        $utcDateTime = $parsed.UtcDateTime
+    }
+
+    return $utcDateTime.ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
 function Get-CollectorAvdParentResourceId {
     [CmdletBinding()]
     param(
@@ -331,7 +371,7 @@ function ConvertTo-CollectorAvdInventory {
                     hostPoolId               = $hostPoolId
                     friendlyName             = [string](Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostFriendlyName')
                     status                   = [string](Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostStatus')
-                    statusTimestamp          = [string](Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostStatusTimestamp')
+                    statusTimestamp          = ConvertTo-CollectorAvdIso8601Utc (Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostStatusTimestamp')
                     allowNewSession          = Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostAllowNewSession'
                     sessions                 = Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostSessions'
                     activeSessions           = Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostActiveSessions'
@@ -341,8 +381,8 @@ function ConvertTo-CollectorAvdInventory {
                     osVersion                = [string](Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostOsVersion')
                     sxsStackVersion          = [string](Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostSxsStackVersion')
                     updateState              = [string](Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostUpdateState')
-                    lastHeartBeat            = [string](Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostLastHeartBeat')
-                    lastUpdateTime           = [string](Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostLastUpdateTime')
+                    lastHeartBeat            = ConvertTo-CollectorAvdIso8601Utc (Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostLastHeartBeat')
+                    lastUpdateTime           = ConvertTo-CollectorAvdIso8601Utc (Get-CollectorAvdProperty -InputObject $row -Name 'sessionHostLastUpdateTime')
                     virtualMachineResourceId = $virtualMachineResourceId
                     tags                     = $tags
                 })
