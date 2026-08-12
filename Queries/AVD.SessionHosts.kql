@@ -1,0 +1,26 @@
+DesktopVirtualizationResources
+| where type =~ 'microsoft.desktopvirtualization/hostpools/sessionhosts'
+| project
+    id,
+    name,
+    type,
+    resourceGroup,
+    subscriptionId,
+    location,
+    tags,
+    sessionHostFriendlyName = tostring(properties.friendlyName),
+    sessionHostLastHeartBeat = tostring(properties.lastHeartBeat),
+    sessionHostSessions = properties.sessions,
+    sessionHostActiveSessions = properties.activeSessions,
+    sessionHostDisconnectedSessions = properties.disconnectedSessions,
+    sessionHostPendingSessions = properties.pendingSessions,
+    sessionHostAgentVersion = tostring(properties.agentVersion),
+    sessionHostAllowNewSession = properties.allowNewSession,
+    sessionHostStatus = tostring(properties.status),
+    sessionHostStatusTimestamp = tostring(properties.statusTimestamp),
+    sessionHostOsVersion = tostring(properties.osVersion),
+    sessionHostSxsStackVersion = tostring(properties.sxSStackVersion),
+    sessionHostUpdateState = tostring(properties.updateState),
+    sessionHostLastUpdateTime = tostring(properties.lastUpdateTime),
+    sessionHostVirtualMachineResourceId = tostring(properties.resourceId)
+| order by subscriptionId asc, resourceGroup asc, name asc, id asc
