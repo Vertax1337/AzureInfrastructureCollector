@@ -134,6 +134,44 @@ Die zentrale `Collector.ExportSecurity.psm1`-Härtung wird vor dem Schreiben von
 
 P4 ist ein Fachmodul. Ein isolierter P4-Fehler darf bei weiterhin erfolgreichem Core-Inventar zu `PartialSuccess` führen. Ein Read-only-/Pre-Azure-Validierungsfehler bleibt dagegen immer kritisch und blockiert Azure vollständig.
 
+## Validierter Real-Export 2026-08-12
+
+Die automatische Pre-Azure-Validierung des finalen P4-Stands wurde unter PowerShell 7.6.4 mit Pester 6.0.1 erfolgreich durchgeführt:
+
+- 9 Testdateien
+- 52/52 Tests bestanden
+- 0 fehlgeschlagen, 0 übersprungen
+- initiales Read-only-Gate: `READ-ONLY VERIFIED`
+- finales Read-only-Gate: `READ-ONLY VERIFIED`
+- Gesamtstatus: `READY FOR AZURE TEST`
+- vor der Azure-Freigabe: `Azure access performed: NO`
+- keine Administrator-Elevation
+
+Der anschließende Real-Run gegen die Kundenumgebung wurde erfolgreich abgeschlossen:
+
+- 12 Resource Groups
+- 134 Core-Ressourcen
+- 22 Network-Quellressourcen / 44 Network-Relationships
+- 11 Compute-Quellressourcen
+- 4 Virtual Machines
+- 7 Managed Disks
+- 0 Availability Sets
+- 4 NIC-Referenzen
+- 4 OS-Disk-Referenzen
+- 3 Data-Disk-Referenzen
+- 18 Compute-Relationships
+- 4/4 Power-State-Snapshots
+- 0 Collector-Fehler
+- Status `Success`
+
+Der geprüfte `compute.json`-Export stimmt für den P4-Scope 1:1 mit dem Core-Inventar überein. Die 4 NIC-Referenzen treffen die 4 normalisierten Network-NICs; alle 4 OS-Disks und 3 Data-Disks treffen die 7 Managed Disks. Für alle 7 Managed Disks stimmt `managedByResourceId` mit der VM überein, die die Disk verwendet. Es wurden 0 doppelte Relationships und 0 Orphan-Quellen/-Ziele festgestellt.
+
+Availability Sets sind in dieser Kundenumgebung nicht vorhanden und werden korrekt als `[]` exportiert. Alle vier VMs lieferten beim Erfassungszeitpunkt einen Power-State-Snapshot; diese Werte bleiben ausdrücklich Momentaufnahmen.
+
+Die Export-Härtung wurde ebenfalls bestätigt: keine PowerShell-Adapter-/`Length`-/`Count`-/`SyncRoot`-Artefakte, keine verschachtelten Arrays, keine RG-Casing-Abweichungen und keine Treffer für `osProfile`, Admin-/Password-/SSH-/UserData-/ProtectedSettings-Inhalte, Boot-Diagnostics-URIs, Secret-/Key-URLs, `encryptionSettingsCollection`, Private-Key-/SAS-/Account-Key-/JWT-/Credential-Muster oder sonstige nicht freigegebene URI-/Encryption-Detailwerte.
+
+Die bereits validierten P3-Dateien `resourceGroups.json`, `resources.json` und `network.json` blieben gegenüber dem unmittelbar vorherigen P3b-Export inhaltlich unverändert.
+
 ## Definition of Done P4
 
 P4 gilt erst als abgeschlossen, wenn:
@@ -143,8 +181,8 @@ P4 gilt erst als abgeschlossen, wenn:
 - [x] `Collector.Compute.psm1` implementiert ist
 - [x] Unit-/Regressionstests für Query, VM, Disks, Availability Sets, Secret-/URI-Minimierung und leere Arrays vorhanden sind
 - [x] `Collect-AzureDocumentation.ps1` P4 vollständig integriert
-- [ ] automatische Pre-Azure-Validierung des finalen P4-Stands mit 0 Testfehlern und `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` erfolgreich
-- [ ] realer P4-Kundenexport erzeugt
-- [ ] `compute.json` gegen Core-Inventar, Relationships, Orphans, Array-/Schema-Stabilität und Secret Leakage geprüft
+- [x] automatische Pre-Azure-Validierung des finalen P4-Stands mit 52/52 Tests, `READ-ONLY VERIFIED` und `READY FOR AZURE TEST` erfolgreich
+- [x] realer P4-Kundenexport erzeugt
+- [x] `compute.json` gegen Core-Inventar, Relationships, Orphans, Array-/Schema-Stabilität und Secret Leakage geprüft
 
-Bis diese letzten Punkte bestätigt sind, ist P4 implementiert, aber noch nicht real validiert.
+> **P4 Compute ist für den aktuellen Entwicklungsstand abgeschlossen. Weitere heterogene Compute-Szenarien, insbesondere positive Availability-Set-/Zone-/Gallery-Sonderfälle, bleiben Bestandteil der späteren P10-Integrationstests und blockieren P5 nicht.**
