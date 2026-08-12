@@ -28,8 +28,8 @@ Describe 'P5 AVD Resource Graph query split regression' {
     It 'invokes both AVD query files through the existing Resource Graph wrapper only' {
         $collector = Get-Content $collectorPath -Raw
 
-        $collector | Should -Match [regex]::Escape("Queries/AVD.kql")
-        $collector | Should -Match [regex]::Escape("Queries/AVD.SessionHosts.kql")
+        $collector | Should -Match ([regex]::Escape('Queries/AVD.kql'))
+        $collector | Should -Match ([regex]::Escape('Queries/AVD.SessionHosts.kql'))
         @([regex]::Matches($collector, 'Invoke-CollectorResourceGraph')).Count | Should -BeGreaterOrEqual 6
         $collector | Should -Not -Match '(?i)\bGet-AzWvd(SessionHost|HostPool|Workspace|ApplicationGroup|ScalingPlan)\b'
         $collector | Should -Not -Match '(?i)\bInvoke-RestMethod\b|\bInvoke-WebRequest\b'
