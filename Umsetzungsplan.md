@@ -4,7 +4,7 @@
 > **Repository:** `Vertax1337/AzureInfrastructureCollector`  
 > **Default Branch:** `main`  
 > **Dokumentstatus:** Verbindlicher Entwicklungsplan  
-> **Stand:** 2026-08-10  
+> **Stand:** 2026-08-12  
 > **Initiale Zielversion:** `0.1.0`
 
 ---
@@ -756,10 +756,12 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 - [x] zusätzliche Resource-ID-basierte Relationships
 - [x] acht dedizierte P3b-Unit-Tests ergänzt
 - [x] statische Read-only-Gegenprüfung: kein neues Azure-Cmdlet, kein REST-/CLI-/SDK-Pfad; bestehender `Search-AzGraph`-Wrapper unverändert
-- [ ] aktuelle automatische Pre-Azure-Validierung des P3b-Stands erfolgreich (`READ-ONLY VERIFIED`, 0 Testfehler, `READY FOR AZURE TEST`)
-- [ ] erster P3b-Real-Export erzeugt und `network.json` auf Counts, Relationships, Orphans, Schema-Stabilität und Secret-Leakage geprüft
+- [x] automatische Pre-Azure-Validierung des finalen P3b-Stands erfolgreich: PowerShell 7.6.4, Pester 6.0.1, 46/46 Tests, beide Gates `READ-ONLY VERIFIED`, `READY FOR AZURE TEST`, vor Freigabe `Azure access performed: NO`
+- [x] P3b-Real-Export 2026-08-12 erfolgreich geprüft: 12 RG, 134 Core-Ressourcen, 22 Network-Ressourcen, 44 eindeutige Relationships, 0 Orphans, 0 Collector-Fehler, `Success`, `READ-ONLY VERIFIED`
+- [x] P3b-Zero-State gegen den tatsächlichen Kunden-Iststand verifiziert: alle 27 P3b-Collections sind echte leere Arrays und das Core-Inventar enthält gleichzeitig 0 Private Endpoints/Private DNS/NAT Gateways/Load Balancer/Application Gateways/Azure Firewalls/Firewall Policies
+- [x] Export-Härtung im P3b-Real-Export bestätigt: keine Adapter-/`Length`-Artefakte, keine verschachtelten Arrays, keine RG-Casing-Abweichungen und keine Treffer für `sharedKey`, Private-Link-`requestMessage`, Zertifikats-/PFX-Material, Firewall-Regelkollektionen oder starke Credential-Muster
 
-> **P3b gilt erst nach erfolgreicher Pre-Azure-Validierung und geprüftem P3b-Real-Export als abgeschlossen.**
+> **P3a und P3b sind damit für den aktuellen Entwicklungsstand abgeschlossen. Positive Real-Azure-Pfade für P3b-Ressourcentypen, die in dieser Kundenumgebung nicht vorhanden sind, bleiben als heterogene Integrationstests unter P10 offen und blockieren P4 nicht.**
 
 ## P4 – Compute
 - [ ] VM-/Disk-/Availability-Daten und Relationships
@@ -780,7 +782,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 - [ ] vereinheitlichtes Relationship-Schema
 
 ## P10 – Qualitätssicherung / Härtung
-- [ ] Integrationstests in heterogenen Testumgebungen
+- [ ] Integrationstests in heterogenen Testumgebungen, insbesondere positive Real-Azure-Abdeckung für P3b-Ressourcentypen
 - [ ] Reader-Rechte / fehlende Berechtigungen
 - [ ] weitergehende Secret Leakage Tests mit späteren Detailmodulen
 - [ ] JSON Schema Validation
@@ -870,7 +872,7 @@ P10  Tests / Härtung
 P11  Release 1.0
 ```
 
-**Aktueller nächster Schritt:** Den implementierten P3b-Stand über den normalen Ein-Befehl-Start ausführen. Die automatisch eingebettete Pre-Azure-Validierung muss erneut `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` liefern. Nach den acht neuen P3b-Tests werden auf Basis des zuletzt erwarteten Stands voraussichtlich **8 Testdateien / 46 erfolgreiche Tests** erwartet; diese Zahl gilt erst nach dem lokalen Lauf als bestätigt. Anschließend wird der reale P3b-Export auf P3a-Rückwärtskompatibilität, P3b-Counts, Resource-ID-Relationships, Orphans, Schema-/Array-Stabilität und Secret-/Zertifikats-Leakage geprüft. Erst danach gilt P3b als abgeschlossen und P4 kann beginnen.
+**Aktueller nächster Schritt:** P3 Network ist abgeschlossen. Als nächster Entwicklungsblock wird P4 Compute umgesetzt. Dabei werden ausschließlich tatsächlich vorhandene VM-/Disk-/Availability-Daten kundengenerisch und read-only erfasst, normalisiert und über Resource IDs verknüpft. Vor dem ersten P4-Real-Run muss der dann aktuelle ausführbare Stand erneut automatisch `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` erreichen.
 
 ---
 
