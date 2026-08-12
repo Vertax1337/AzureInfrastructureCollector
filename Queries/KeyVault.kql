@@ -1,0 +1,25 @@
+Resources
+| where type =~ 'microsoft.keyvault/vaults'
+| project
+    id,
+    name,
+    type,
+    resourceGroup,
+    subscriptionId,
+    location,
+    tags,
+    skuName = tostring(properties.sku.name),
+    skuFamily = tostring(properties.sku.family),
+    enableRbacAuthorization = properties.enableRbacAuthorization,
+    enableSoftDelete = properties.enableSoftDelete,
+    enablePurgeProtection = properties.enablePurgeProtection,
+    softDeleteRetentionInDays = properties.softDeleteRetentionInDays,
+    publicNetworkAccess = tostring(properties.publicNetworkAccess),
+    enabledForDeployment = properties.enabledForDeployment,
+    enabledForDiskEncryption = properties.enabledForDiskEncryption,
+    enabledForTemplateDeployment = properties.enabledForTemplateDeployment,
+    networkDefaultAction = tostring(properties.networkAcls.defaultAction),
+    networkBypass = tostring(properties.networkAcls.bypass),
+    networkVirtualNetworkRules = properties.networkAcls.virtualNetworkRules,
+    networkIpRules = properties.networkAcls.ipRules
+| order by subscriptionId asc, resourceGroup asc, name asc, id asc
