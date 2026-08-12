@@ -20,7 +20,7 @@ Die Trennung ist bewusst gewählt, damit Datenmodell, Secret-Grenzen und später
 
 ## Azure-Zugriffsarchitektur
 
-P6 verwendet ausschließlich den bereits verifizierten Azure-Resource-Graph-Pfad:
+P6 verwendet ausschließlich den bereits bestehenden Azure-Resource-Graph-Pfad:
 
 ```text
 Resources
@@ -38,7 +38,7 @@ alle Queries
   -> JSON-Export
 ```
 
-Es werden keine neuen Azure PowerShell Cmdlets, keine REST-Aufrufe, keine Azure CLI und kein SDK-Schreibpfad eingeführt.
+Es werden keine neuen Azure PowerShell Fachcmdlets, keine REST-Aufrufe, keine Azure CLI und kein SDK-Schreibpfad eingeführt. Die beiden Backup-Tabellen werden getrennt abgefragt und erst lokal zusammengeführt.
 
 ## P6a – Storage
 
@@ -136,7 +136,7 @@ P6 normalisiert eine providerübergreifende Policy-Grundstruktur:
 - ARM ID / Name
 - Parent Vault ARM ID
 - Provider Model (`RecoveryServices` / `DataProtection`)
-- Data Source Types
+- Data Source Types als stabiles Array
 - Protected Item Count, soweit geliefert
 - Schedule Run Frequency, soweit als stabiles Metadatum geliefert
 - Policy-/Retention-Typ, soweit geliefert
@@ -267,6 +267,20 @@ Key-/Secret-/Certificate-Objektmetadaten sind im P6-MVP bewusst nicht enthalten,
 
 Leere Collections bleiben echte JSON-Arrays `[]`.
 
+## Collector-Integration
+
+P6 ist als eigene Phase 6 von 8 in `Collect-AzureDocumentation.ps1` integriert. Storage, Key Vault und Backup besitzen getrennte `try/catch`-Grenzen, damit ein isolierter P6-Unterbereich bei erfolgreichem Core/P3/P4/P5 nicht die übrigen P6-Domänen verdeckt.
+
+Phase 7 schreibt zusätzlich `storage.json`, `backup.json` und `keyVault.json`. Phase 8 ergänzt `summary.storage`, `summary.backup` und `summary.keyVault` sowie die P6-Relationship-Counts in Log/Konsolenausgabe.
+
+Die bereits real validierten P3-/P4-/P5-Module und Queries wurden für P6 nicht verändert. P6 wird ausschließlich zusätzlich hinter P5 integriert.
+
+## Statische Read-only-Gegenprüfung
+
+Der aktuelle P6-Diff führt ausschließlich zusätzliche Azure-Resource-Graph-Abfragen über den vorhandenen `Invoke-CollectorResourceGraph`-/`Search-AzGraph`-Pfad ein. Im P6-Ausführungspfad wurden keine neuen Az-Fachcmdlets, REST-/Web-Aufrufe, Azure-CLI-Befehle, SDK-Schreibpfade oder Data-Plane-Key-/Secret-Abfragen ergänzt.
+
+Dies ist ausdrücklich nur die **statische** Gegenprüfung. Durch die neuen ausführbaren P6-Dateien ist die Laufzeitfreigabe des zuvor validierten P5-Stands für den aktuellen `main` nicht mehr ausreichend. Vor einem realen P6-Azure-Lauf muss die komplette automatische Pre-Azure-Validierung erneut erfolgreich sein.
+
 ## Fehler- und Statussemantik
 
 P6 ist ein Fachmodul. Ein isolierter P6-Fehler darf bei weiterhin erfolgreichem Core/P3/P4/P5 zu `PartialSuccess` führen. Jeder Read-only-/Pre-Azure-Validierungsfehler blockiert Azure weiterhin vollständig.
@@ -281,12 +295,12 @@ Protection State und Last Recovery Point sind Momentaufnahmen des Erfassungszeit
 - [x] `Collector.Storage.psm1` implementiert
 - [x] `Collector.Backup.psm1` implementiert
 - [x] `Collector.KeyVault.psm1` implementiert
-- [x] Unit-/Regressionstests für Query-Safety, Normalisierung, Relationships und Empty Arrays ergänzt
-- [ ] P6 vollständig in `Collect-AzureDocumentation.ps1` integriert
-- [ ] `storage.json`, `backup.json`, `keyVault.json` und Summary-Bereiche im normalen Collector integriert
-- [ ] statische Read-only-Gegenprüfung des finalen ausführbaren P6-Stands abgeschlossen
+- [x] Unit-/Regressionstests für Query-Safety, Normalisierung, Relationships, Array-Shape und Empty Arrays ergänzt
+- [x] P6 vollständig in `Collect-AzureDocumentation.ps1` integriert
+- [x] `storage.json`, `backup.json`, `keyVault.json` und Summary-Bereiche im normalen Collector integriert
+- [x] statische Read-only-Gegenprüfung des finalen ausführbaren P6-Stands: kein neuer Azure-Write-/REST-/CLI-/SDK-/Data-Plane-Secret-Pfad erkannt
 - [ ] automatische Pre-Azure-Validierung mit 0 Testfehlern, `READ-ONLY VERIFIED` und `READY FOR AZURE TEST`
 - [ ] realer P6-Kundenexport erzeugt
-- [ ] P6-Exports gegen Core/P3/P4, Relationships, Orphans, Array-/Schema-Stabilität und Secret-Leakage geprüft
+- [ ] P6-Exports gegen Core/P3/P4/P5, Relationships, Orphans, Array-/Schema-Stabilität und Secret-Leakage geprüft
 
-> **P6 ist implementiert/in Integration, aber noch nicht real validiert. Jede ausführbare P6-Codeänderung benötigt vor Azure erneut die vollständige Pre-Azure-Validierung.**
+> **P6 ist vollständig implementiert und statisch gegengeprüft, aber noch nicht für Azure freigegeben bzw. real validiert. Der aktuelle ausführbare Stand muss vor Azure erneut die vollständige automatische Pre-Azure-Validierung bestehen.**
