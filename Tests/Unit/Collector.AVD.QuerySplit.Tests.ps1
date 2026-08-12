@@ -19,10 +19,10 @@ Describe 'P5 AVD Resource Graph query split regression' {
         $sessionHostExecutableLines | Should -Match '(?im)^\s*DesktopVirtualizationResources\s*$'
         $sessionHostExecutableLines | Should -Not -Match '(?im)^\s*Resources\s*$'
         $sessionHostExecutableLines | Should -Not -Match '(?i)\|\s*union\b'
-        $sessionHostExecutableLines | Should -Match '(?i)sessionHostLastHeartBeat\s*=\s*format_datetime\(todatetime\(properties\.lastHeartBeat\)'
-        $sessionHostExecutableLines | Should -Match '(?i)sessionHostStatusTimestamp\s*=\s*format_datetime\(todatetime\(properties\.statusTimestamp\)'
-        $sessionHostExecutableLines | Should -Match '(?i)sessionHostLastUpdateTime\s*=\s*format_datetime\(todatetime\(properties\.lastUpdateTime\)'
-        $sessionHostExecutableLines | Should -Match "yyyy-MM-dd'T'HH:mm:ss\.fffffff'Z'"
+        $sessionHostExecutableLines | Should -Match '(?i)sessionHostLastHeartBeat\s*=\s*todatetime\(properties\.lastHeartBeat\)'
+        $sessionHostExecutableLines | Should -Match '(?i)sessionHostStatusTimestamp\s*=\s*todatetime\(properties\.statusTimestamp\)'
+        $sessionHostExecutableLines | Should -Match '(?i)sessionHostLastUpdateTime\s*=\s*todatetime\(properties\.lastUpdateTime\)'
+        $sessionHostExecutableLines | Should -Not -Match '(?i)format_datetime\s*\('
     }
 
     It 'invokes both AVD query files through the existing Resource Graph wrapper only' {
