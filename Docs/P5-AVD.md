@@ -8,15 +8,20 @@ P5 verwendet ausschließlich den bereits bestehenden Azure-Resource-Graph-Zugrif
 
 ```text
 Azure Resource Graph
-  -> Resources + DesktopVirtualizationResources
-  -> Queries/AVD.kql
+  -> Resources
+       -> Queries/AVD.kql
+  -> DesktopVirtualizationResources
+       -> Queries/AVD.SessionHosts.kql
   -> Invoke-CollectorResourceGraph / Search-AzGraph
+  -> lokale Zusammenführung der Ergebniszeilen
   -> Collector.AVD.psm1
   -> Collector.ExportSecurity.psm1
   -> Inventory/avd.json
 ```
 
 Für `Microsoft.DesktopVirtualization/hostpools/sessionhosts` wird die spezielle Azure-Resource-Graph-Tabelle `DesktopVirtualizationResources` verwendet. Es wird kein zusätzliches AVD-PowerShell-Cmdlet, kein REST-Aufruf, keine Azure CLI und kein SDK-Schreibpfad eingeführt.
+
+Die beiden ARG-Tabellen werden absichtlich in getrennten Queries gelesen. Azure Resource Graph unterstützt über das SDK keine allgemeine Cross-Table-`union`-Abfrage zwischen `Resources` und `DesktopVirtualizationResources`. Die Ergebnisarrays werden deshalb erst lokal im Collector zusammengeführt.
 
 ## Scope
 
@@ -170,6 +175,32 @@ Session Hosts stammen dagegen aus `DesktopVirtualizationResources` und müssen n
 - `virtualMachineResourceId`, soweit geliefert, existiert im P4-Compute-Inventar,
 - Relationships sind eindeutig und orphan-frei innerhalb der bekannten Referenzgrenzen.
 
+## Erster Real-Run und Query-Hotfix 2026-08-12
+
+Der erste P5-Lauf erreichte vor Azure erfolgreich:
+
+- PowerShell 7.6.4
+- Pester 6.0.1
+- 10 Testdateien
+- 59/59 Tests bestanden
+- initiales und finales Read-only-Gate jeweils `READ-ONLY VERIFIED`
+- `READY FOR AZURE TEST`
+- vor Azure `Azure access performed: NO`
+- keine Administrator-Elevation
+
+P3 und P4 liefen anschließend weiterhin erfolgreich. Die erste P5-Abfrage schlug jedoch mit Azure Resource Graph `BadRequest` fehl; der Collector reagierte korrekt mit `PartialSuccess`, schrieb ein leeres schema-stabiles `avd.json` und veränderte keine Azure-Ressource.
+
+Ursache war die ursprünglich in einer einzelnen Query verwendete Cross-Table-`union`-Konstruktion zwischen `Resources` und `DesktopVirtualizationResources`. Die Resource-Graph-SDK-Grenze erlaubt diese Tabellenkombination nicht als allgemeines `union`.
+
+Der Hotfix trennt deshalb die Abfragen in:
+
+- `Queries/AVD.kql` -> ausschließlich Top-Level-AVD-Ressourcen aus `Resources`
+- `Queries/AVD.SessionHosts.kql` -> ausschließlich Session Hosts aus `DesktopVirtualizationResources`
+
+Beide werden weiterhin ausschließlich über `Invoke-CollectorResourceGraph` / `Search-AzGraph` ausgeführt; erst danach werden die Ergebniszeilen lokal zusammengeführt. Zusätzliche Regressionstests verhindern künftig wieder eine Cross-Table-`union`-Konstruktion.
+
+Da ausführbarer Code geändert wurde, muss der Hotfix vor einem erneuten Azure-Lauf wieder die vollständige automatische Pre-Azure-Validierung bestehen.
+
 ## Fehlerverhalten
 
 P5 ist ein Fachmodul. Ein isolierter P5-Fehler darf bei weiterhin erfolgreichem Core-/P3-/P4-Inventar zu `PartialSuccess` führen. Ein Read-only-/Pre-Azure-Validierungsfehler bleibt immer kritisch und blockiert Azure vollständig.
@@ -179,13 +210,13 @@ P5 ist ein Fachmodul. Ein isolierter P5-Fehler darf bei weiterhin erfolgreichem 
 P5 gilt erst als abgeschlossen, wenn:
 
 - [x] AVD-Scope und Sicherheits-/Datenminimierungsgrenze dokumentiert sind
-- [x] `Queries/AVD.kql` mit `Resources` und `DesktopVirtualizationResources` implementiert ist
+- [x] getrennte `Queries/AVD.kql` und `Queries/AVD.SessionHosts.kql` ohne unsupported Cross-Table-`union` implementiert sind
 - [x] `Collector.AVD.psm1` implementiert ist
-- [x] Unit-/Regressionstests für Query-Safety, Workspace, Host Pool, Application Group, Session Host, Scaling Plan und leere Arrays vorhanden sind
+- [x] Unit-/Regressionstests für Query-Safety, Query-Split, Workspace, Host Pool, Application Group, Session Host, Scaling Plan und leere Arrays vorhanden sind
 - [x] `Collect-AzureDocumentation.ps1` P5 vollständig integriert
 - [x] `Inventory/avd.json` und `summary.avd` im normalen Collector integriert
-- [ ] automatische Pre-Azure-Validierung des finalen P5-Stands mit 0 Testfehlern und `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` erfolgreich
-- [ ] realer P5-Kundenexport erzeugt
+- [ ] automatische Pre-Azure-Validierung des finalen P5-Hotfix-Stands mit 0 Testfehlern und `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` erfolgreich
+- [ ] erfolgreicher P5-Kundenexport nach Query-Hotfix erzeugt
 - [ ] `avd.json` gegen Core/P4, Relationships, Orphans, Array-/Schema-Stabilität und Secret-/PII-Leakage geprüft
 
-> **P5 ist implementiert, aber noch nicht real validiert. Durch die P5-Codeänderungen ist die vorherige P4-Laufzeitfreigabe für den aktuellen ausführbaren Stand nicht mehr ausreichend. Vor dem ersten P5-Azure-Lauf muss die automatische Pre-Azure-Validierung erneut erfolgreich sein.**
+> **P5 ist implementiert und der erste Real-Run-Fehler wurde behoben, aber der Hotfix ist noch nicht erneut Pre-Azure-/real validiert.**
