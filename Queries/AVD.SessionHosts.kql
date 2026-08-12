@@ -9,7 +9,7 @@ DesktopVirtualizationResources
     location,
     tags,
     sessionHostFriendlyName = tostring(properties.friendlyName),
-    sessionHostLastHeartBeat = format_datetime(todatetime(properties.lastHeartBeat), "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'"),
+    sessionHostLastHeartBeat = todatetime(properties.lastHeartBeat),
     sessionHostSessions = properties.sessions,
     sessionHostActiveSessions = properties.activeSessions,
     sessionHostDisconnectedSessions = properties.disconnectedSessions,
@@ -17,10 +17,10 @@ DesktopVirtualizationResources
     sessionHostAgentVersion = tostring(properties.agentVersion),
     sessionHostAllowNewSession = properties.allowNewSession,
     sessionHostStatus = tostring(properties.status),
-    sessionHostStatusTimestamp = format_datetime(todatetime(properties.statusTimestamp), "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'"),
+    sessionHostStatusTimestamp = todatetime(properties.statusTimestamp),
     sessionHostOsVersion = tostring(properties.osVersion),
     sessionHostSxsStackVersion = tostring(properties.sxSStackVersion),
     sessionHostUpdateState = tostring(properties.updateState),
-    sessionHostLastUpdateTime = format_datetime(todatetime(properties.lastUpdateTime), "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'"),
+    sessionHostLastUpdateTime = todatetime(properties.lastUpdateTime),
     sessionHostVirtualMachineResourceId = tostring(properties.resourceId)
 | order by subscriptionId asc, resourceGroup asc, name asc, id asc
