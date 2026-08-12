@@ -181,7 +181,7 @@ function ConvertTo-CollectorBackupInventory {
                     subscriptionId       = $subscriptionId
                     resourceGroup        = $resourceGroup
                     vaultId              = $vaultId
-                    dataSourceTypes       = @([string](Get-CollectorBackupProperty -InputObject $row -Name 'recoveryBackupManagementType')) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+                    dataSourceTypes       = @(@([string](Get-CollectorBackupProperty -InputObject $row -Name 'recoveryBackupManagementType')) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
                     protectedItemsCount  = Get-CollectorBackupProperty -InputObject $row -Name 'recoveryProtectedItemsCount'
                     scheduleRunFrequency = [string](Get-CollectorBackupProperty -InputObject $row -Name 'recoveryScheduleRunFrequency')
                     retentionPolicyType  = [string](Get-CollectorBackupProperty -InputObject $row -Name 'recoveryRetentionPolicyType')
