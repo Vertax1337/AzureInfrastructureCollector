@@ -20,10 +20,12 @@ $readOnlyGuardModulePath = Join-Path $scriptRoot 'Modules/Collector.ReadOnlyGuar
 $coreModulePath = Join-Path $scriptRoot 'Modules/Collector.Core.psm1'
 $exportSecurityModulePath = Join-Path $scriptRoot 'Modules/Collector.ExportSecurity.psm1'
 $networkModulePath = Join-Path $scriptRoot 'Modules/Collector.Network.psm1'
+$computeModulePath = Join-Path $scriptRoot 'Modules/Collector.Compute.psm1'
 $configPath = Join-Path $scriptRoot 'Config/collector.config.json'
 $resourcesQueryPath = Join-Path $scriptRoot 'Queries/Resources.kql'
 $resourceGroupsQueryPath = Join-Path $scriptRoot 'Queries/ResourceGroups.kql'
 $networkQueryPath = Join-Path $scriptRoot 'Queries/Network.kql'
+$computeQueryPath = Join-Path $scriptRoot 'Queries/Compute.kql'
 
 function Write-CollectorStage {
     [CmdletBinding()]
@@ -60,6 +62,7 @@ Write-Host ''
 Import-Module $coreModulePath -Force -ErrorAction Stop
 Import-Module $exportSecurityModulePath -Force -ErrorAction Stop
 Import-Module $networkModulePath -Force -ErrorAction Stop
+Import-Module $computeModulePath -Force -ErrorAction Stop
 
 $config = Get-CollectorConfig -Path $configPath
 $prerequisites = Test-CollectorPrerequisites -MinimumPowerShellVersion ([version]$config.requirements.minimumPowerShellVersion) -RequiredModules @($config.requirements.requiredModules)
@@ -94,7 +97,7 @@ $pageSize = [int]$config.resourceGraph.pageSize
 $sensitivePattern = [string]$config.security.sensitivePropertyPattern
 $sensitiveValuePatterns = @($config.security.sensitiveValuePatterns | ForEach-Object { [string]$_ })
 $jsonDepth = [int]$config.export.jsonDepth
-$totalStages = 5
+$totalStages = 6
 
 $publicReadOnlyVerification = New-CollectorPublicReadOnlyVerification -Verification $readOnlyVerification
 $publicReadOnlyVerification = Protect-CollectorExportValue `
@@ -245,19 +248,70 @@ finally {
     Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
 }
 
-Write-CollectorStage -Step 4 -Total $totalStages -Message 'Writing normalized inventory JSON files...'
+$computeInventory = ConvertTo-CollectorComputeInventory -Rows @()
+Write-CollectorStage -Step 4 -Total $totalStages -Message 'Collecting P4 compute inventory from Azure Resource Graph...'
+Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Compute: waiting for Azure Resource Graph response...'
+try {
+    $computeQuery = Get-Content -LiteralPath $computeQueryPath -Raw -Encoding UTF8
+    $computeRows = @(Invoke-CollectorResourceGraph -Query $computeQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
+    $computeRows = @($computeRows | Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup })
+
+    # Keep Resource Group casing aligned with the canonical Core inventory.
+    foreach ($computeRow in $computeRows) {
+        $canonicalResourceGroup = $resourceGroups |
+            Where-Object {
+                [string]$_.subscriptionId -eq [string]$computeRow.subscriptionId -and
+                [string]$_.name -eq [string]$computeRow.resourceGroup
+            } |
+            Select-Object -First 1
+
+        if ($canonicalResourceGroup) {
+            $computeRow.resourceGroup = [string]$canonicalResourceGroup.name
+        }
+    }
+
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status ("Compute: normalizing {0} resource rows and relationships..." -f $computeRows.Count)
+    $computeInventory = ConvertTo-CollectorComputeInventory -Rows $computeRows
+    $computeInventory = Protect-CollectorExportValue `
+        -Value $computeInventory `
+        -SensitivePropertyPattern $sensitivePattern `
+        -SensitiveValuePatterns $sensitiveValuePatterns
+
+    Write-CollectorLog -Path $run.logPath -Level INFO -Message ("P4 compute inventory collected. Source resources: {0}; VMs: {1}; managed disks: {2}; availability sets: {3}; relationships: {4}." -f $computeRows.Count, $computeInventory.summary.virtualMachines, $computeInventory.summary.managedDisks, $computeInventory.summary.availabilitySets, $computeInventory.summary.relationships)
+    Write-Host ("[{0}]       Compute source resources: {1}" -f (Get-Date).ToString('HH:mm:ss'), $computeRows.Count)
+    Write-Host ("[{0}]       VMs/Managed Disks/Availability Sets: {1}/{2}/{3}" -f (Get-Date).ToString('HH:mm:ss'), $computeInventory.summary.virtualMachines, $computeInventory.summary.managedDisks, $computeInventory.summary.availabilitySets)
+    Write-Host ("[{0}]       NIC/OS Disk/Data Disk refs: {1}/{2}/{3}" -f (Get-Date).ToString('HH:mm:ss'), $computeInventory.summary.networkInterfaceReferences, $computeInventory.summary.osDiskReferences, $computeInventory.summary.dataDiskReferences)
+    Write-Host ("[{0}]       Compute relationships: {1}" -f (Get-Date).ToString('HH:mm:ss'), $computeInventory.summary.relationships)
+}
+catch {
+    $errorItem = [pscustomobject][ordered]@{
+        module  = 'Compute.P4'
+        message = $_.Exception.Message
+    }
+    $errors.Add($errorItem)
+    Write-CollectorLog -Path $run.logPath -Level ERROR -Message ("P4 compute collection failed: {0}" -f $_.Exception.Message)
+    Write-Warning ("P4 compute collection failed: {0}" -f $_.Exception.Message)
+}
+finally {
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
+}
+
+Write-CollectorStage -Step 5 -Total $totalStages -Message 'Writing normalized inventory JSON files...'
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Writing resourceGroups.json...'
 Export-CollectorJson -InputObject @($resourceGroups) -Path (Join-Path $run.inventoryPath 'resourceGroups.json') -Depth $jsonDepth
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Writing resources.json...'
 Export-CollectorJson -InputObject @($resources) -Path (Join-Path $run.inventoryPath 'resources.json') -Depth $jsonDepth
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Writing network.json...'
 Export-CollectorJson -InputObject $networkInventory -Path (Join-Path $run.inventoryPath 'network.json') -Depth $jsonDepth
-Write-Host ("[{0}]       Inventory JSON written (resourceGroups.json, resources.json, network.json)." -f (Get-Date).ToString('HH:mm:ss'))
+Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Writing compute.json...'
+Export-CollectorJson -InputObject $computeInventory -Path (Join-Path $run.inventoryPath 'compute.json') -Depth $jsonDepth
+Write-Host ("[{0}]       Inventory JSON written (resourceGroups.json, resources.json, network.json, compute.json)." -f (Get-Date).ToString('HH:mm:ss'))
 
-Write-CollectorStage -Step 5 -Total $totalStages -Message 'Building summary and manifest...'
+Write-CollectorStage -Step 6 -Total $totalStages -Message 'Building summary and manifest...'
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Building summary.json...'
 $summary = New-CollectorSummary -Resources @($resources) -ResourceGroups @($resourceGroups) -Subscriptions @($selectedSubscriptions) -ResourceGroupFilter $resourceGroupFilter
 Add-Member -InputObject $summary -NotePropertyName network -NotePropertyValue $networkInventory.summary -Force
+Add-Member -InputObject $summary -NotePropertyName compute -NotePropertyValue $computeInventory.summary -Force
 $summary = Protect-CollectorExportValue `
     -Value $summary `
     -SensitivePropertyPattern $sensitivePattern `
@@ -277,7 +331,7 @@ Export-CollectorJson -InputObject $manifest -Path (Join-Path $run.rootPath 'mani
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
 
 $duration = $completedAt - $startedAt
-Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Collector completed with status '{0}'. Resources: {1}; resource groups: {2}; network relationships: {3}; errors: {4}; duration: {5}." -f $status, $resources.Count, $resourceGroups.Count, $networkInventory.summary.relationships, $errors.Count, $duration)
+Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Collector completed with status '{0}'. Resources: {1}; resource groups: {2}; network relationships: {3}; compute relationships: {4}; errors: {5}; duration: {6}." -f $status, $resources.Count, $resourceGroups.Count, $networkInventory.summary.relationships, $computeInventory.summary.relationships, $errors.Count, $duration)
 
 Write-Host ''
 Write-Host 'COLLECTION COMPLETE'
@@ -285,6 +339,7 @@ Write-Host ("Status: {0}" -f $status)
 Write-Host ("Resource Groups: {0}" -f $resourceGroups.Count)
 Write-Host ("Resources: {0}" -f $resources.Count)
 Write-Host ("Network Relationships: {0}" -f $networkInventory.summary.relationships)
+Write-Host ("Compute Relationships: {0}" -f $computeInventory.summary.relationships)
 Write-Host ("Errors: {0}" -f $errors.Count)
 Write-Host ("Duration: {0:mm\:ss}" -f $duration)
 Write-Host ("Export completed: {0}" -f $run.rootPath)
