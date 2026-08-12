@@ -1,14 +1,9 @@
-union (
-    Resources
-    | where type in~ (
-        'microsoft.desktopvirtualization/workspaces',
-        'microsoft.desktopvirtualization/hostpools',
-        'microsoft.desktopvirtualization/applicationgroups',
-        'microsoft.desktopvirtualization/scalingplans'
-    )
-), (
-    DesktopVirtualizationResources
-    | where type =~ 'microsoft.desktopvirtualization/hostpools/sessionhosts'
+Resources
+| where type in~ (
+    'microsoft.desktopvirtualization/workspaces',
+    'microsoft.desktopvirtualization/hostpools',
+    'microsoft.desktopvirtualization/applicationgroups',
+    'microsoft.desktopvirtualization/scalingplans'
 )
 | project
     id,
@@ -40,21 +35,6 @@ union (
     applicationGroupType = tostring(properties.applicationGroupType),
     applicationGroupHostPoolArmPath = tostring(properties.hostPoolArmPath),
     applicationGroupShowInFeed = properties.showInFeed,
-    sessionHostFriendlyName = tostring(properties.friendlyName),
-    sessionHostLastHeartBeat = tostring(properties.lastHeartBeat),
-    sessionHostSessions = properties.sessions,
-    sessionHostActiveSessions = properties.activeSessions,
-    sessionHostDisconnectedSessions = properties.disconnectedSessions,
-    sessionHostPendingSessions = properties.pendingSessions,
-    sessionHostAgentVersion = tostring(properties.agentVersion),
-    sessionHostAllowNewSession = properties.allowNewSession,
-    sessionHostStatus = tostring(properties.status),
-    sessionHostStatusTimestamp = tostring(properties.statusTimestamp),
-    sessionHostOsVersion = tostring(properties.osVersion),
-    sessionHostSxsStackVersion = tostring(properties.sxSStackVersion),
-    sessionHostUpdateState = tostring(properties.updateState),
-    sessionHostLastUpdateTime = tostring(properties.lastUpdateTime),
-    sessionHostVirtualMachineResourceId = tostring(properties.resourceId),
     scalingPlanFriendlyName = tostring(properties.friendlyName),
     scalingPlanExclusionTag = tostring(properties.exclusionTag),
     scalingPlanHostPoolType = tostring(properties.hostPoolType),
