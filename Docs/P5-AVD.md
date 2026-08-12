@@ -21,7 +21,7 @@ Azure Resource Graph
 
 Für `Microsoft.DesktopVirtualization/hostpools/sessionhosts` wird die spezielle Azure-Resource-Graph-Tabelle `DesktopVirtualizationResources` verwendet. Es wird kein zusätzliches AVD-PowerShell-Cmdlet, kein REST-Aufruf, keine Azure CLI und kein SDK-Schreibpfad eingeführt.
 
-Die beiden ARG-Tabellen werden absichtlich in getrennten Queries gelesen. Azure Resource Graph unterstützt über das SDK keine allgemeine Cross-Table-`union`-Abfrage zwischen `Resources` und `DesktopVirtualizationResources`. Die Ergebnisarrays werden deshalb erst lokal im Collector zusammengeführt.
+Die beiden ARG-Tabellen werden absichtlich in getrennten Queries gelesen. Eine Cross-Table-`union`-Konstruktion zwischen `Resources` und `DesktopVirtualizationResources` führte im ersten Real-Run zu `BadRequest`; die Ergebnisarrays werden deshalb erst lokal im Collector zusammengeführt.
 
 ## Scope
 
@@ -91,6 +91,8 @@ Normalisiert werden ausschließlich technische Betriebsmetadaten:
 - Resource ID der zugrunde liegenden Azure VM
 
 Die direkte VM-Resource-ID wird für die Verbindung zum bereits normalisierten P4-Compute-Modell verwendet.
+
+Die drei Session-Host-Zeitfelder werden in ARG mit `todatetime()` typisiert und anschließend lokal, invariant und in UTC als `yyyy-MM-ddTHH:mm:ss.fffffffZ` normalisiert. Fehlende Zeitwerte bleiben leer.
 
 ### Scaling Plans
 
@@ -163,7 +165,7 @@ Die zentrale `Collector.ExportSecurity.psm1`-Härtung wird vor dem Schreiben von
 
 Status, Session-Zahlen und Heartbeat sind ausschließlich Momentaufnahmen des Erfassungszeitpunkts. Sie werden nicht als historische Verfügbarkeits- oder Nutzungsstatistik interpretiert.
 
-Ein fehlender Status, fehlender Heartbeat oder fehlende VM-Resource-ID wird als nicht von Azure Resource Graph geliefert behandelt. Fehlende Werte werden nicht ergänzt oder aus Namen hergeleitet.
+Ein fehlender Status, fehlender Heartbeat, fehlender Status Timestamp oder fehlende VM-Resource-ID wird als nicht von Azure Resource Graph geliefert behandelt. Fehlende Werte werden nicht ergänzt oder aus Namen hergeleitet.
 
 ## Core-/P4-Abgleich
 
@@ -175,31 +177,48 @@ Session Hosts stammen dagegen aus `DesktopVirtualizationResources` und müssen n
 - `virtualMachineResourceId`, soweit geliefert, existiert im P4-Compute-Inventar,
 - Relationships sind eindeutig und orphan-frei innerhalb der bekannten Referenzgrenzen.
 
-## Erster Real-Run und Query-Hotfix 2026-08-12
+## Validierungsverlauf und finaler Real-Run 2026-08-12
 
-Der erste P5-Lauf erreichte vor Azure erfolgreich:
+Der erste P5-Real-Run zeigte eine nicht unterstützte Cross-Table-`union`-Konstruktion zwischen `Resources` und `DesktopVirtualizationResources`. Der Collector reagierte korrekt mit `PartialSuccess`; P3/P4 blieben erfolgreich und Azure wurde nicht verändert.
+
+Nach dem Query-Split wurde ein erfolgreicher Real-Run mit 4 Top-Level-AVD-Ressourcen und 1 Session Host erreicht. Dabei fiel auf, dass die Session-Host-Zeitfelder locale-abhängig serialisiert wurden. Eine anschließende ARG-Formatierung mit `format_datetime()` führte im Real-Run erneut zu `BadRequest`. Der finale Ansatz verwendet deshalb nur `todatetime()` in ARG und normalisiert die Zeitwerte lokal in PowerShell.
+
+Der finale P5-Stand wurde am 2026-08-12 erfolgreich validiert:
 
 - PowerShell 7.6.4
 - Pester 6.0.1
-- 10 Testdateien
-- 59/59 Tests bestanden
+- 12 Testdateien
+- 62/62 Tests bestanden
 - initiales und finales Read-only-Gate jeweils `READ-ONLY VERIFIED`
 - `READY FOR AZURE TEST`
 - vor Azure `Azure access performed: NO`
 - keine Administrator-Elevation
+- Real-Run `Success`
+- 12 Resource Groups
+- 134 Core-Ressourcen
+- P3: 22 Network-Ressourcen / 44 Relationships
+- P4: 11 Compute-Ressourcen / 18 Relationships
+- P5: 4 Top-Level-AVD-Ressourcen + 1 Session Host = 5 Quellzeilen
+- 1 Workspace
+- 1 Host Pool
+- 2 Application Groups
+- 1 Session Host
+- 0 Scaling Plans
+- 6 eindeutige AVD-Relationships
+- 1 SessionHost->VM-Referenz, erfolgreich gegen P4 aufgelöst
+- 0 doppelte Relationships
+- 0 Orphan-Quellen/-Ziele
+- 0 Collector-Fehler
 
-P3 und P4 liefen anschließend weiterhin erfolgreich. Die erste P5-Abfrage schlug jedoch mit Azure Resource Graph `BadRequest` fehl; der Collector reagierte korrekt mit `PartialSuccess`, schrieb ein leeres schema-stabiles `avd.json` und veränderte keine Azure-Ressource.
+Die vier Top-Level-AVD-Ressourcen stimmen 1:1 mit dem Core-Inventar überein. `summary.avd` stimmt mit `avd.json` überein. Der Session Host referenziert exakt die vorhandene P4-VM.
 
-Ursache war die ursprünglich in einer einzelnen Query verwendete Cross-Table-`union`-Konstruktion zwischen `Resources` und `DesktopVirtualizationResources`. Die Resource-Graph-SDK-Grenze erlaubt diese Tabellenkombination nicht als allgemeines `union`.
+Die finale Zeitnormalisierung wurde im Real-Export bestätigt:
 
-Der Hotfix trennt deshalb die Abfragen in:
+- `lastHeartBeat`: ISO-8601 UTC
+- `lastUpdateTime`: ISO-8601 UTC
+- `statusTimestamp`: leer, da von Azure im Snapshot nicht geliefert
 
-- `Queries/AVD.kql` -> ausschließlich Top-Level-AVD-Ressourcen aus `Resources`
-- `Queries/AVD.SessionHosts.kql` -> ausschließlich Session Hosts aus `DesktopVirtualizationResources`
-
-Beide werden weiterhin ausschließlich über `Invoke-CollectorResourceGraph` / `Search-AzGraph` ausgeführt; erst danach werden die Ergebniszeilen lokal zusammengeführt. Zusätzliche Regressionstests verhindern künftig wieder eine Cross-Table-`union`-Konstruktion.
-
-Da ausführbarer Code geändert wurde, muss der Hotfix vor einem erneuten Azure-Lauf wieder die vollständige automatische Pre-Azure-Validierung bestehen.
+Der Export zeigte keine verschachtelten Arrays oder PowerShell-Adapter-Artefakte. Der rekursive Secret-/PII-Scan ergab keine Treffer für Registration Tokens, Assigned User, Health-/Update-Fehlertexte, RDP-/VM-Template-/SSO-Secret-Pfade, Scaling-Notification-Texte, Private Keys, SAS/Account Keys, JWTs, eingebettete Credentials oder E-Mail-/UPN-Werte.
 
 ## Fehlerverhalten
 
@@ -207,16 +226,16 @@ P5 ist ein Fachmodul. Ein isolierter P5-Fehler darf bei weiterhin erfolgreichem 
 
 ## Definition of Done P5
 
-P5 gilt erst als abgeschlossen, wenn:
-
-- [x] AVD-Scope und Sicherheits-/Datenminimierungsgrenze dokumentiert sind
-- [x] getrennte `Queries/AVD.kql` und `Queries/AVD.SessionHosts.kql` ohne unsupported Cross-Table-`union` implementiert sind
-- [x] `Collector.AVD.psm1` implementiert ist
-- [x] Unit-/Regressionstests für Query-Safety, Query-Split, Workspace, Host Pool, Application Group, Session Host, Scaling Plan und leere Arrays vorhanden sind
+- [x] AVD-Scope und Sicherheits-/Datenminimierungsgrenze dokumentiert
+- [x] getrennte `Queries/AVD.kql` und `Queries/AVD.SessionHosts.kql` implementiert
+- [x] `Collector.AVD.psm1` implementiert
+- [x] Query-Split gegen Cross-Table-`union` abgesichert
+- [x] lokale invariant-UTC-/ISO-8601-Zeitnormalisierung implementiert
+- [x] Unit-/Regressionstests für Query-Safety, Query-Split, DateTime, Workspace, Host Pool, Application Group, Session Host, Scaling Plan und leere Arrays vorhanden
 - [x] `Collect-AzureDocumentation.ps1` P5 vollständig integriert
 - [x] `Inventory/avd.json` und `summary.avd` im normalen Collector integriert
-- [ ] automatische Pre-Azure-Validierung des finalen P5-Hotfix-Stands mit 0 Testfehlern und `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` erfolgreich
-- [ ] erfolgreicher P5-Kundenexport nach Query-Hotfix erzeugt
-- [ ] `avd.json` gegen Core/P4, Relationships, Orphans, Array-/Schema-Stabilität und Secret-/PII-Leakage geprüft
+- [x] automatische Pre-Azure-Validierung des finalen P5-Stands erfolgreich: 62/62, `READ-ONLY VERIFIED`, `READY FOR AZURE TEST`
+- [x] erfolgreicher P5-Kundenexport erzeugt: `Success`, 0 Fehler
+- [x] `avd.json` gegen Core/P4, Relationships, Orphans, Array-/Schema-Stabilität und Secret-/PII-Leakage geprüft
 
-> **P5 ist implementiert und der erste Real-Run-Fehler wurde behoben, aber der Hotfix ist noch nicht erneut Pre-Azure-/real validiert.**
+> **P5 Azure Virtual Desktop ist für den aktuellen Entwicklungsstand abgeschlossen. Zusätzliche heterogene AVD-Szenarien, insbesondere positive Scaling-Plan- und Multi-Session-Host-Varianten, bleiben Bestandteil späterer P10-Integrationstests und blockieren P6 nicht.**
