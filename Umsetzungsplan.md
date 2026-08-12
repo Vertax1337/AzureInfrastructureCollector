@@ -146,6 +146,7 @@ Collect-AzureDocumentation.ps1
    +--> Azure Resource Graph / geprüfte Read-only Cmdlets
    +--> Core-Normalisierung
    +--> P3 Network-Normalisierung / Relationships (P3a + P3b)
+   +--> P4 Compute-Normalisierung / Relationships
    +--> Collector.ExportSecurity
    |      +--> sensitive Property-Namen redigieren
    |      +--> sensitive Wertmuster redigieren
@@ -161,6 +162,7 @@ Normalisiertes und gehärtetes JSON-Modell
    +--> Inventory/resourceGroups.json
    +--> Inventory/resources.json
    +--> Inventory/network.json
+   +--> Inventory/compute.json
    +--> Logs
 ```
 
@@ -337,6 +339,14 @@ Für P3 gilt zusätzlich:
 - Azure-Firewall-Regelkollektionen werden in P3b nicht normalisiert/exportiert,
 - Firewall-Policy-Transport-Security-/Zertifikatsdaten werden in P3b nicht normalisiert/exportiert.
 
+Für P4 gilt zusätzlich:
+
+- VM `osProfile`, Administrator-/SSH-Konfiguration und `userData` werden nicht abgefragt/exportiert,
+- VM Extensions und Restore Point Collections gehören nicht zum P4-Scope,
+- Boot-Diagnostics-Storage-URIs werden nicht exportiert,
+- Key-/Secret-URLs und `encryptionSettingsCollection` werden nicht exportiert,
+- verschachtelte Data-Disk-Objekte werden auf explizit freigegebene Metadaten reduziert; Unmanaged-VHD-/Image-URIs und Disk-Encryption-Set-Details werden nicht normalisiert/exportiert.
+
 ## 5.6 Reproduzierbarkeit
 
 Stabile Felder, konsistente Dateinamen, definierte Sortierung, ISO-8601-Zeitstempel, Resource IDs und Schema-/Collector-Versionen. Resource-Group-Referenzen in Ressourcen werden subscriptionbezogen gegen `resourceGroups.json` kanonisiert.
@@ -376,6 +386,7 @@ AzureInfrastructureCollector/
 |   +-- Resources.kql
 |   +-- ResourceGroups.kql
 |   +-- Network.kql
+|   +-- Compute.kql
 +-- Config/
 +-- Schemas/
 +-- Tests/
@@ -384,6 +395,7 @@ AzureInfrastructureCollector/
 |   +-- Invoke-PreAzureValidation.ps1
 +-- Docs/
 |   +-- P3-Network.md
+|   +-- P4-Compute.md
 ```
 
 ---
@@ -472,7 +484,22 @@ P3b erweitert dasselbe Network-Modell um:
 P3b erfasst bewusst keine Application-Gateway-Zertifikatsinhalte, keine Azure-Firewall-Regelkollektionen und keine Firewall-Policy-Transport-Security-/Zertifikatsdaten. Vollständige rohe `properties`-Blöcke werden auch in P3 nicht als Abkürzung exportiert.
 
 ## Compute
-VMs, Size/SKU, OS/Image, Availability, NIC-Zuordnung, OS-/Data-Disks, Disk SKU/Size, optional Power State als Momentaufnahme.
+
+P4 erfasst kundengenerisch:
+
+- Virtual Machines,
+- VM Size,
+- Provisioning State,
+- Availability Zones und Availability-Set-Referenzen,
+- Marketplace-/Gallery-Image-Metadaten,
+- NIC-Referenzen,
+- OS-Disk-Metadaten und Managed-Disk-ID,
+- Data-Disk-Metadaten und Managed-Disk-IDs,
+- Managed Disks mit SKU/Tier/Größe/OS-Type/Disk-State/Managed-By,
+- Availability Sets mit Fault-/Update-Domain-Counts, VM-Referenzen und optionaler Proximity-Placement-Group-ID,
+- optionalen VM Power State als Best-Effort-Momentaufnahme.
+
+Der Power State ist kein historischer Laufzeitnachweis. Ein nicht von Azure Resource Graph zurückgegebener Zustand bleibt leer und wird nicht interpretiert. VM Extensions, Restore Point Collections, `osProfile`, Boot-Diagnostics-URIs und Secret-/Key-/Encryption-Detaildaten sind bewusst nicht Teil von P4.
 
 ## AVD
 Workspaces, Host Pools, Application Groups, Session Hosts, Settings, Start VM on Connect, Scaling Plans und Beziehungen zur VM.
@@ -499,6 +526,7 @@ Log Analytics, Diagnostic Settings, Action Groups, Alerts, Automation Accounts, 
 |   +-- resourceGroups.json
 |   +-- resources.json
 |   +-- network.json
+|   +-- compute.json
 +-- Logs/
 ```
 
@@ -520,16 +548,25 @@ Resource ID ist der bevorzugte technische Primärschlüssel. Arrays werden stabi
 - `relationships`,
 - eine Network-Summary mit den jeweiligen Counts.
 
+`Inventory/compute.json` enthält nach P4 insbesondere:
+
+- `virtualMachines` mit `imageReference`, `osDisk`, `networkInterfaces` und `dataDisks`,
+- `managedDisks`,
+- `availabilitySets`,
+- `relationships`,
+- eine Compute-Summary mit VM-/Disk-/Availability-/Referenz-/Power-State-/Relationship-Counts.
+
 Export-Minimierung:
 
 - lokale Repository-/Arbeitsplatzpfade werden nicht in `readOnlyVerification.json` ausgegeben,
 - das ausführende Azure-Konto/UPN wird nicht in `manifest.json` ausgegeben,
 - Tenant-, Subscription- und Resource IDs bleiben als technische Korrelationsschlüssel erhalten,
-- Network-Abfragen projizieren nur explizit freigegebene Felder,
+- Network- und Compute-Abfragen projizieren nur explizit freigegebene Felder,
 - Connection Shared Keys werden nicht abgefragt,
 - Private-Link-Freitext wird nicht normalisiert/exportiert,
 - Application-Gateway-Zertifikatsmaterial wird nicht normalisiert/exportiert,
-- Azure-Firewall-Regelkollektionen werden in P3b nicht normalisiert/exportiert.
+- Azure-Firewall-Regelkollektionen werden in P3b nicht normalisiert/exportiert,
+- P4 exportiert kein `osProfile`, keine VM-Extensions/-ProtectedSettings, keine Unmanaged-VHD-/Image-URIs und keine Key-/Secret-URLs oder Disk-Encryption-Detailobjekte.
 
 ---
 
@@ -589,13 +626,20 @@ Azure Firewall -> ContainsAzureFirewallIpConfiguration -> IP Configuration
 Azure Firewall IP Configuration -> AttachedToSubnet / UsesPublicIp
 Firewall Policy -> InheritsFromFirewallPolicy -> Base Policy
 
-VM -> Managed Disk
+VM -> UsesNetworkInterface -> Network Interface
+VM -> UsesOsDisk -> Managed Disk
+VM -> UsesDataDisk -> Managed Disk
+VM -> UsesAvailabilitySet -> Availability Set
+Managed Disk -> ManagedByResource -> Azure Resource
+Availability Set -> ContainsVm -> VM
+Availability Set -> UsesProximityPlacementGroup -> Proximity Placement Group
+
 AVD Session Host -> VM
 Diagnostic Setting -> Destination
 Backup -> Protected Resource
 ```
 
-P3 verwendet ein Network-spezifisches Relationship-Array. P9 vereinheitlicht später die Relationship-Schemata aller Fachmodule.
+P3 und P4 verwenden derzeit fachmodulspezifische Relationship-Arrays. P9 vereinheitlicht später die Relationship-Schemata aller Fachmodule.
 
 Azure Resource IDs bleiben der bevorzugte technische Schlüssel. Für ausgewählte untergeordnete Azure-Objekte ohne eigene Resource ID dürfen ausschließlich deterministische Child-IDs unterhalb der Azure-Parent-ID erzeugt werden; keine Namensheuristik darf eine Beziehung zu einer externen Ressource erfinden.
 
@@ -605,7 +649,7 @@ Azure Resource IDs bleiben der bevorzugte technische Schlüssel. Für ausgewähl
 
 Logs enthalten Zeitstempel, Level, Modul/Aktion und Ergebnis; niemals Secrets oder Access Tokens.
 
-Der normale Collector zeigt zusätzlich sichtbare Phasenmeldungen und Objektzähler, damit längere ARG-/Exportvorgänge nicht wie ein stiller Hänger wirken. Der Network-Bereich wird innerhalb der dritten von fünf sichtbaren Collector-Phasen erfasst.
+Der normale Collector zeigt zusätzlich sichtbare Phasenmeldungen und Objektzähler, damit längere ARG-/Exportvorgänge nicht wie ein stiller Hänger wirken. P3 Network wird in Phase 3 von 6 und P4 Compute in Phase 4 von 6 erfasst; danach folgen Export und Summary/Manifest.
 
 Kritische Fehler:
 
@@ -617,7 +661,7 @@ Kritische Fehler:
 - Tenant/Subscription nicht erreichbar,
 - Core-Export nicht möglich.
 
-Ein isolierter P3-Netzwerkfehler darf bei erfolgreichem Core-Inventar zu `PartialSuccess` führen, nicht zu einem stillen Verlust des Core-Exports.
+Ein isolierter P3-Netzwerk- oder P4-Compute-Fehler darf bei erfolgreichem Core-Inventar zu `PartialSuccess` führen, nicht zu einem stillen Verlust des Core-Exports.
 
 Exit-Code-Kategorien:
 
@@ -645,7 +689,7 @@ Der Collector benötigt keine KI.
 Azure -> Collector -> JSON -> AI Documentation Pipeline -> Markdown/DOCX/PDF/Diagramme
 ```
 
-Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere sollen Netzwerkbeziehungen soweit technisch möglich explizit als Resource-ID-Relationships vorliegen und nicht aus Namenskonventionen erraten werden.
+Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere sollen Beziehungen soweit technisch möglich explizit als Resource-ID-Relationships vorliegen und nicht aus Namenskonventionen erraten werden.
 
 ---
 
@@ -764,7 +808,21 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 > **P3a und P3b sind damit für den aktuellen Entwicklungsstand abgeschlossen. Positive Real-Azure-Pfade für P3b-Ressourcentypen, die in dieser Kundenumgebung nicht vorhanden sind, bleiben als heterogene Integrationstests unter P10 offen und blockieren P4 nicht.**
 
 ## P4 – Compute
-- [ ] VM-/Disk-/Availability-Daten und Relationships
+- [x] Architektur und Sicherheits-/Datenminimierungsgrenze dokumentiert (`Docs/P4-Compute.md`)
+- [x] `Queries/Compute.kql` mit expliziter Projektion für Virtual Machines, Managed Disks und Availability Sets
+- [x] `Collector.Compute.psm1` für VM-/Disk-/Availability-Normalisierung und Resource-ID-Relationships
+- [x] VM Size, Image-Metadaten, Zones/Availability Set, NIC-Referenzen sowie OS-/Data-Disk-Metadaten implementiert
+- [x] Managed-Disk-SKU/Tier/Size/OS-Type/Disk-State/Managed-By implementiert
+- [x] Availability-Set-Fault-/Update-Domain-Counts, VM-Referenzen und optionale PPG-Referenz implementiert
+- [x] optionaler ARG-Power-State als Best-Effort-Momentaufnahme implementiert; fehlende Werte werden nicht interpretiert
+- [x] `Inventory/compute.json` und `summary.compute` in den normalen Collector integriert
+- [x] P4 als Phase 4 von 6 in sichtbare Collector-Ausgabe und Fehler-/PartialSuccess-Pfad integriert
+- [x] sechs dedizierte P4-Unit-/Regressionstests für Query-Safety, VM, Disk, Availability Set, sensitive URI/Encryption-Minimierung und leere Arrays ergänzt
+- [x] statische Read-only-Gegenprüfung: kein neues Azure-Cmdlet, kein REST-/CLI-/SDK-Pfad; bestehender `Invoke-CollectorResourceGraph`/`Search-AzGraph`-Pfad wird wiederverwendet
+- [ ] automatische Pre-Azure-Validierung des finalen P4-Stands erfolgreich (`READ-ONLY VERIFIED`, 0 Testfehler, `READY FOR AZURE TEST`)
+- [ ] erster P4-Real-Export erzeugt und `compute.json` auf Core-Abgleich, Relationships, Orphans, Schema-/Array-Stabilität und Secret Leakage geprüft
+
+> **P4 ist implementiert, aber noch nicht real validiert. Durch die P4-Codeänderungen ist die vorherige P3b-Laufzeitfreigabe für den aktuellen ausführbaren Stand nicht mehr ausreichend. Vor dem ersten P4-Azure-Lauf muss die automatische Pre-Azure-Validierung erneut erfolgreich sein.**
 
 ## P5 – AVD
 - [ ] AVD-Struktur und VM-Beziehungen
@@ -820,6 +878,8 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 18. Netzwerkbeziehungen werden soweit möglich über Resource IDs und nicht über Namensheuristiken modelliert.
 19. P3b darf Private-Link-Freitext, Application-Gateway-Zertifikatsmaterial, Azure-Firewall-Regelkollektionen oder Firewall-Policy-Zertifikats-/Transport-Security-Daten nicht exportieren, solange hierfür keine separate spätere Sicherheitsentscheidung getroffen wurde.
 20. Synthetische Child-IDs dürfen nur deterministisch unterhalb einer bekannten Azure-Parent-ID erzeugt werden und niemals eine externe Resource-ID erfinden.
+21. P4 darf VM-`osProfile`, Admin-/SSH-/UserData-Daten, VM Extension Settings, Boot-Diagnostics-Storage-URIs, Unmanaged-VHD-/Image-URIs sowie Key-/Secret-/Disk-Encryption-Detailwerte nicht in `compute.json` exportieren.
+22. Ein fehlender P4-Power-State darf niemals als bestimmter VM-Zustand interpretiert oder ergänzt werden.
 
 ---
 
@@ -872,7 +932,7 @@ P10  Tests / Härtung
 P11  Release 1.0
 ```
 
-**Aktueller nächster Schritt:** P3 Network ist abgeschlossen. Als nächster Entwicklungsblock wird P4 Compute umgesetzt. Dabei werden ausschließlich tatsächlich vorhandene VM-/Disk-/Availability-Daten kundengenerisch und read-only erfasst, normalisiert und über Resource IDs verknüpft. Vor dem ersten P4-Real-Run muss der dann aktuelle ausführbare Stand erneut automatisch `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` erreichen.
+**Aktueller nächster Schritt:** P4 Compute ist implementiert, aber noch nicht real validiert. Der aktuelle `main` muss über den normalen Ein-Befehl-Start die automatische Pre-Azure-Validierung bestehen. Auf Basis des bisherigen 46-Test-Stands plus sechs neuer P4-Tests werden **voraussichtlich 9 Testdateien / 52 Tests** erwartet; diese Zahl ist erst nach dem lokalen Lauf bestätigt. Nur bei `Failed: 0`, beiden Gates `READ-ONLY VERIFIED` und `READY FOR AZURE TEST` darf der anschließende P4-Real-Run stattfinden. Danach wird `compute.json` gegen das Core-Inventar auf VM-/Disk-/Availability-Counts, NIC-/OS-Disk-/Data-Disk-Relationships, Orphans, Power-State-Abdeckung, RG-Casing, Array-/Schema-Stabilität und Secret-/URI-Leakage geprüft. Erst danach gilt P4 als abgeschlossen und P5 AVD wird begonnen.
 
 ---
 
