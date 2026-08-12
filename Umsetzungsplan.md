@@ -147,6 +147,7 @@ Collect-AzureDocumentation.ps1
    +--> Core-Normalisierung
    +--> P3 Network-Normalisierung / Relationships (P3a + P3b)
    +--> P4 Compute-Normalisierung / Relationships
+   +--> P5 AVD-Normalisierung / Relationships
    +--> Collector.ExportSecurity
    |      +--> sensitive Property-Namen redigieren
    |      +--> sensitive Wertmuster redigieren
@@ -163,6 +164,7 @@ Normalisiertes und gehärtetes JSON-Modell
    +--> Inventory/resources.json
    +--> Inventory/network.json
    +--> Inventory/compute.json
+   +--> Inventory/avd.json
    +--> Logs
 ```
 
@@ -347,6 +349,15 @@ Für P4 gilt zusätzlich:
 - Key-/Secret-URLs und `encryptionSettingsCollection` werden nicht exportiert,
 - verschachtelte Data-Disk-Objekte werden auf explizit freigegebene Metadaten reduziert; Unmanaged-VHD-/Image-URIs und Disk-Encryption-Set-Details werden nicht normalisiert/exportiert.
 
+Für P5 gilt zusätzlich:
+
+- Host-Pool-Registration-Informationen und Registration Tokens werden nicht abgefragt/exportiert,
+- SSO-Secret-Key-Vault-Pfade, VM Templates und rohe `customRdpProperty`-Freitexte werden nicht exportiert,
+- Session-Host `assignedUser`, interne Object IDs/VM GUIDs, Health-Check-Detailobjekte und Update-Fehlermeldungen werden nicht exportiert,
+- einzelne AVD User Sessions und deren Benutzeridentitäten gehören nicht zum P5-Scope,
+- veröffentlichte Application-Child-Ressourcen mit File Paths/Command-Line-Argumenten gehören nicht zum P5-Scope,
+- Scaling-Plan-Benachrichtigungstexte werden nicht exportiert.
+
 ## 5.6 Reproduzierbarkeit
 
 Stabile Felder, konsistente Dateinamen, definierte Sortierung, ISO-8601-Zeitstempel, Resource IDs und Schema-/Collector-Versionen. Resource-Group-Referenzen in Ressourcen werden subscriptionbezogen gegen `resourceGroups.json` kanonisiert.
@@ -387,6 +398,7 @@ AzureInfrastructureCollector/
 |   +-- ResourceGroups.kql
 |   +-- Network.kql
 |   +-- Compute.kql
+|   +-- AVD.kql
 +-- Config/
 +-- Schemas/
 +-- Tests/
@@ -396,6 +408,7 @@ AzureInfrastructureCollector/
 +-- Docs/
 |   +-- P3-Network.md
 |   +-- P4-Compute.md
+|   +-- P5-AVD.md
 ```
 
 ---
@@ -502,7 +515,17 @@ P4 erfasst kundengenerisch:
 Der Power State ist kein historischer Laufzeitnachweis. Ein nicht von Azure Resource Graph zurückgegebener Zustand bleibt leer und wird nicht interpretiert. VM Extensions, Restore Point Collections, `osProfile`, Boot-Diagnostics-URIs und Secret-/Key-/Encryption-Detaildaten sind bewusst nicht Teil von P4.
 
 ## AVD
-Workspaces, Host Pools, Application Groups, Session Hosts, Settings, Start VM on Connect, Scaling Plans und Beziehungen zur VM.
+
+P5 erfasst kundengenerisch:
+
+- Workspaces einschließlich Application-Group-Referenzen,
+- Host Pools einschließlich Host-Pool-Type, Load-Balancing, Max-Session-Limit, Public Network Access und Start VM on Connect,
+- Application Groups einschließlich Type, Host-Pool-Referenz und Show In Feed,
+- Session Hosts einschließlich technischer Status-/Session-/Agent-/OS-/Heartbeat-Metadaten und direkter VM-Resource-ID,
+- Scaling Plans einschließlich Host-Pool-Referenzen, Zeitzone und technischen Scaling-Schedule-Parametern,
+- Resource-ID-basierte Beziehungen zwischen Workspace, Application Group, Host Pool, Session Host, P4-VM und Scaling Plan.
+
+Top-Level-AVD-Ressourcen werden aus `Resources` gelesen; Session Hosts werden über `DesktopVirtualizationResources` erfasst. P5 exportiert keine User Sessions, Assigned Users, Registration Tokens, SSO-Secret-Pfade, VM Templates, rohe RDP-Freitexte, Application-Command/File-Paths, Health-/Update-Fehlermeldungstexte oder Scaling-Notification-Freitexte.
 
 ## Storage / Backup / Key Vault
 Storage-Konfigurationsmetadaten, Backup-Vaults/-Policies/-Protected Items und Key-Vault-Konfiguration. Keine Blob-/Dateiinhalte, Backup-Inhalte, Secrets, Keys oder Private Keys.
@@ -527,6 +550,7 @@ Log Analytics, Diagnostic Settings, Action Groups, Alerts, Automation Accounts, 
 |   +-- resources.json
 |   +-- network.json
 |   +-- compute.json
+|   +-- avd.json
 +-- Logs/
 ```
 
@@ -556,17 +580,28 @@ Resource ID ist der bevorzugte technische Primärschlüssel. Arrays werden stabi
 - `relationships`,
 - eine Compute-Summary mit VM-/Disk-/Availability-/Referenz-/Power-State-/Relationship-Counts.
 
+`Inventory/avd.json` enthält nach P5 insbesondere:
+
+- `workspaces`,
+- `hostPools`,
+- `applicationGroups`,
+- `sessionHosts`,
+- `scalingPlans`,
+- `relationships`,
+- eine AVD-Summary mit Ressourcen-, Referenz-, Schedule-, Start-VM-on-Connect- und Relationship-Counts.
+
 Export-Minimierung:
 
 - lokale Repository-/Arbeitsplatzpfade werden nicht in `readOnlyVerification.json` ausgegeben,
 - das ausführende Azure-Konto/UPN wird nicht in `manifest.json` ausgegeben,
 - Tenant-, Subscription- und Resource IDs bleiben als technische Korrelationsschlüssel erhalten,
-- Network- und Compute-Abfragen projizieren nur explizit freigegebene Felder,
+- Network-, Compute- und AVD-Abfragen projizieren nur explizit freigegebene Felder,
 - Connection Shared Keys werden nicht abgefragt,
 - Private-Link-Freitext wird nicht normalisiert/exportiert,
 - Application-Gateway-Zertifikatsmaterial wird nicht normalisiert/exportiert,
 - Azure-Firewall-Regelkollektionen werden in P3b nicht normalisiert/exportiert,
-- P4 exportiert kein `osProfile`, keine VM-Extensions/-ProtectedSettings, keine Unmanaged-VHD-/Image-URIs und keine Key-/Secret-URLs oder Disk-Encryption-Detailobjekte.
+- P4 exportiert kein `osProfile`, keine VM-Extensions/-ProtectedSettings, keine Unmanaged-VHD-/Image-URIs und keine Key-/Secret-URLs oder Disk-Encryption-Detailobjekte,
+- P5 exportiert keine Registration-/SSO-Secrets, VM-Template-/RDP-Freitexte, Assigned Users/User Sessions, Health-/Update-Fehlertexte, Application-Ausführungspfade oder Scaling-Notification-Texte.
 
 ---
 
@@ -634,14 +669,19 @@ Managed Disk -> ManagedByResource -> Azure Resource
 Availability Set -> ContainsVm -> VM
 Availability Set -> UsesProximityPlacementGroup -> Proximity Placement Group
 
-AVD Session Host -> VM
+Workspace -> ReferencesApplicationGroup -> Application Group
+Application Group -> UsesHostPool -> Host Pool
+Host Pool -> ContainsSessionHost -> Session Host
+Session Host -> BackedByVm -> VM
+Scaling Plan -> TargetsHostPool -> Host Pool
+
 Diagnostic Setting -> Destination
 Backup -> Protected Resource
 ```
 
-P3 und P4 verwenden derzeit fachmodulspezifische Relationship-Arrays. P9 vereinheitlicht später die Relationship-Schemata aller Fachmodule.
+P3, P4 und P5 verwenden derzeit fachmodulspezifische Relationship-Arrays. P9 vereinheitlicht später die Relationship-Schemata aller Fachmodule.
 
-Azure Resource IDs bleiben der bevorzugte technische Schlüssel. Für ausgewählte untergeordnete Azure-Objekte ohne eigene Resource ID dürfen ausschließlich deterministische Child-IDs unterhalb der Azure-Parent-ID erzeugt werden; keine Namensheuristik darf eine Beziehung zu einer externen Ressource erfinden.
+Azure Resource IDs bleiben der bevorzugte technische Schlüssel. Für ausgewählte untergeordnete Azure-Objekte ohne eigene Resource ID dürfen ausschließlich deterministische Child-IDs unterhalb der Azure-Parent-ID erzeugt werden; keine Namensheuristik darf eine Beziehung zu einer externen Ressource erfinden. Für P5 wird die Parent-Host-Pool-ID eines Session Hosts deterministisch aus dessen eigener ARM-ID abgeleitet; die VM-Beziehung stammt ausschließlich aus der von Azure gelieferten Session-Host-`resourceId`.
 
 ---
 
@@ -649,7 +689,7 @@ Azure Resource IDs bleiben der bevorzugte technische Schlüssel. Für ausgewähl
 
 Logs enthalten Zeitstempel, Level, Modul/Aktion und Ergebnis; niemals Secrets oder Access Tokens.
 
-Der normale Collector zeigt zusätzlich sichtbare Phasenmeldungen und Objektzähler, damit längere ARG-/Exportvorgänge nicht wie ein stiller Hänger wirken. P3 Network wird in Phase 3 von 6 und P4 Compute in Phase 4 von 6 erfasst; danach folgen Export und Summary/Manifest.
+Der normale Collector zeigt zusätzlich sichtbare Phasenmeldungen und Objektzähler, damit längere ARG-/Exportvorgänge nicht wie ein stiller Hänger wirken. P3 Network wird in Phase 3 von 7, P4 Compute in Phase 4 von 7 und P5 AVD in Phase 5 von 7 erfasst; danach folgen Export und Summary/Manifest.
 
 Kritische Fehler:
 
@@ -661,7 +701,7 @@ Kritische Fehler:
 - Tenant/Subscription nicht erreichbar,
 - Core-Export nicht möglich.
 
-Ein isolierter P3-Netzwerk- oder P4-Compute-Fehler darf bei erfolgreichem Core-Inventar zu `PartialSuccess` führen, nicht zu einem stillen Verlust des Core-Exports.
+Ein isolierter P3-Netzwerk-, P4-Compute- oder P5-AVD-Fehler darf bei erfolgreichem Core-Inventar zu `PartialSuccess` führen, nicht zu einem stillen Verlust des Core-Exports.
 
 Exit-Code-Kategorien:
 
@@ -828,7 +868,22 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 > **P4 Compute ist für den aktuellen Entwicklungsstand abgeschlossen. Weitere heterogene Compute-Szenarien, insbesondere positive Availability-Set-/Zone-/Gallery-Sonderfälle, bleiben Bestandteil der späteren P10-Integrationstests und blockieren P5 nicht.**
 
 ## P5 – AVD
-- [ ] AVD-Struktur und VM-Beziehungen
+- [x] Architektur und Sicherheits-/PII-Minimierungsgrenze dokumentiert (`Docs/P5-AVD.md`)
+- [x] `Queries/AVD.kql` für Workspaces, Host Pools, Application Groups, Scaling Plans und Session Hosts implementiert
+- [x] Session Hosts über Azure Resource Graph `DesktopVirtualizationResources` integriert; kein zusätzlicher AVD-Cmdlet-/REST-/CLI-/SDK-Pfad
+- [x] `Collector.AVD.psm1` für AVD-Normalisierung und Resource-ID-Relationships implementiert
+- [x] Workspace-/Application-Group-Referenzen, Host-Pool-Betriebseinstellungen und Start VM on Connect implementiert
+- [x] Session-Host-Status-/Session-/Agent-/OS-/Heartbeat-Metadaten sowie direkte P4-VM-Resource-ID implementiert
+- [x] Scaling-Plan-Host-Pool-Referenzen und sichere technische Schedule-Parameter implementiert
+- [x] `Inventory/avd.json` und `summary.avd` in den normalen Collector integriert
+- [x] P5 als Phase 5 von 7 in sichtbare Collector-Ausgabe und Fehler-/PartialSuccess-Pfad integriert
+- [x] sieben dedizierte P5-Unit-/Regressionstests für Query-Safety, Workspace, Host Pool, Application Group, Session Host, Scaling Plan und leere Arrays ergänzt
+- [x] sensitive/PII-haltige AVD-Pfade bewusst ausgeschlossen: Registration Tokens, SSO-Secret-Pfade, VM Templates, rohe RDP-Freitexte, Assigned Users/User Sessions, Health-/Update-Fehlerdetails, Application-Ausführungspfade und Scaling-Notification-Texte
+- [x] statische Read-only-Gegenprüfung: kein neues Azure-Cmdlet, kein REST-/CLI-/SDK-Schreibpfad; bestehender `Invoke-CollectorResourceGraph`/`Search-AzGraph`-Pfad wird wiederverwendet
+- [ ] automatische Pre-Azure-Validierung des finalen P5-Stands erfolgreich (`READ-ONLY VERIFIED`, 0 Testfehler, `READY FOR AZURE TEST`)
+- [ ] erster P5-Real-Export erzeugt und `avd.json` gegen Core/P4, Relationships, Orphans, Array-/Schema-Stabilität und Secret-/PII-Leakage geprüft
+
+> **P5 ist implementiert, aber noch nicht real validiert. Durch die P5-Codeänderungen ist die bestätigte P4-Laufzeitfreigabe für den aktuellen ausführbaren Stand nicht mehr ausreichend. Vor dem ersten P5-Azure-Lauf muss die automatische Pre-Azure-Validierung erneut erfolgreich sein.**
 
 ## P6 – Storage / Backup / Key Vault
 - [ ] Metadaten und Secret-Filtering
@@ -876,13 +931,15 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 13. Vor realen Azure-Läufen muss der aktuelle Stand `READY FOR AZURE TEST` erreichen; im normalen Startpfad wird dies automatisch erzwungen.
 14. Architektur-/Scope-Änderungen werden zuerst in diesem Dokument festgelegt.
 15. Jeder Fachmodul-Export muss vor dem Schreiben durch die zentrale Export-Härtung laufen.
-16. P3/P4 dürfen keine parallelen Sonderwege für Secret-Filtering oder RG-Normalisierung einführen.
+16. P3/P4/P5 dürfen keine parallelen Sonderwege für Secret-Filtering oder RG-Normalisierung einführen.
 17. Network Connections dürfen `sharedKey` weder abfragen noch exportieren.
 18. Netzwerkbeziehungen werden soweit möglich über Resource IDs und nicht über Namensheuristiken modelliert.
 19. P3b darf Private-Link-Freitext, Application-Gateway-Zertifikatsmaterial, Azure-Firewall-Regelkollektionen oder Firewall-Policy-Zertifikats-/Transport-Security-Daten nicht exportieren, solange hierfür keine separate spätere Sicherheitsentscheidung getroffen wurde.
 20. Synthetische Child-IDs dürfen nur deterministisch unterhalb einer bekannten Azure-Parent-ID erzeugt werden und niemals eine externe Resource-ID erfinden.
 21. P4 darf VM-`osProfile`, Admin-/SSH-/UserData-Daten, VM Extension Settings, Boot-Diagnostics-Storage-URIs, Unmanaged-VHD-/Image-URIs sowie Key-/Secret-/Disk-Encryption-Detailwerte nicht in `compute.json` exportieren.
 22. Ein fehlender P4-Power-State darf niemals als bestimmter VM-Zustand interpretiert oder ergänzt werden.
+23. P5 darf Registration Tokens, SSO-Secret-Pfade, Assigned Users/User Sessions, Application-Ausführungspfade sowie frei formulierte Health-/Update-/Scaling-Notification-Texte nicht in `avd.json` exportieren.
+24. P5 darf Session-Host-zu-VM-Beziehungen ausschließlich aus der von Azure gelieferten VM-Resource-ID ableiten; DNS-/VM-Namensheuristiken sind dafür nicht zulässig.
 
 ---
 
@@ -935,7 +992,7 @@ P10  Tests / Härtung
 P11  Release 1.0
 ```
 
-**Aktueller nächster Schritt:** P4 Compute ist abgeschlossen. Als nächster Entwicklungsblock wird P5 AVD umgesetzt. Dabei werden Workspaces, Host Pools, Application Groups, Session Hosts, relevante Host-Pool-/AVD-Einstellungen, Start VM on Connect, Scaling Plans sowie Resource-ID-basierte Beziehungen insbesondere zwischen Session Hosts und den bereits normalisierten P4-VMs kundengenerisch und ausschließlich lesend erfasst. Vor dem ersten P5-Real-Run muss der dann aktuelle ausführbare Stand erneut automatisch `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` erreichen.
+**Aktueller nächster Schritt:** P5 AVD ist implementiert, aber noch nicht real validiert. Der aktuelle `main` muss über den normalen Ein-Befehl-Start die automatische Pre-Azure-Validierung bestehen. Auf Basis des bestätigten P4-Stands mit 52 Tests plus sieben neuen P5-Tests werden **voraussichtlich 10 Testdateien / 59 Tests** erwartet; diese Zahl gilt erst nach dem lokalen Lauf als bestätigt. Nur bei `Failed: 0`, beiden Gates `READ-ONLY VERIFIED` und `READY FOR AZURE TEST` darf der anschließende P5-Real-Run stattfinden. Danach wird `avd.json` gegen das Core-/P4-Inventar auf Workspace-/Host-Pool-/Application-Group-/Session-Host-/Scaling-Plan-Counts, Session-Host-zu-VM-Relationships, Orphans, Start-VM-on-Connect, Session-/Status-Momentaufnahmen, RG-Casing, Array-/Schema-Stabilität sowie Secret-/PII-Leakage geprüft. Erst danach gilt P5 als abgeschlossen und P6 wird begonnen.
 
 ---
 
