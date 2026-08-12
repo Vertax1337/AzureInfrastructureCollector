@@ -1,3 +1,7 @@
+// Top-level AVD resources are queried from Resources only.
+// Session hosts (microsoft.desktopvirtualization/hostpools/sessionhosts) are queried separately
+// from DesktopVirtualizationResources in Queries/AVD.SessionHosts.kql because Azure Resource
+// Graph SDK does not support a cross-table union between Resources and DesktopVirtualizationResources.
 Resources
 | where type in~ (
     'microsoft.desktopvirtualization/workspaces',
