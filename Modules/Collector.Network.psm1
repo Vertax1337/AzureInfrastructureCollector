@@ -853,8 +853,15 @@ function ConvertTo-CollectorNetworkInventory {
                     $probeId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $ruleProperties 'probe') 'id')
                     $backendPoolIds = @()
                     $singleBackendPoolId = [string](Get-CollectorNetworkProperty (Get-CollectorNetworkProperty $ruleProperties 'backendAddressPool') 'id')
-                    if (-not [string]::IsNullOrWhiteSpace($singleBackendPoolId)) { $backendPoolIds += $singleBackendPoolId }
-                    $backendPoolIds += @(ConvertTo-CollectorNetworkIdArray (Get-CollectorNetworkProperty $ruleProperties 'backendAddressPools'))
+                    if (-not [string]::IsNullOrWhiteSpace($singleBackendPoolId)) {
+                        $backendPoolIds += $singleBackendPoolId
+                    }
+                    $additionalBackendPoolIds = ConvertTo-CollectorNetworkIdArray (Get-CollectorNetworkProperty $ruleProperties 'backendAddressPools')
+                    foreach ($additionalBackendPoolId in @($additionalBackendPoolIds)) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$additionalBackendPoolId)) {
+                            $backendPoolIds += [string]$additionalBackendPoolId
+                        }
+                    }
                     $backendPoolIds = @($backendPoolIds | Sort-Object -Unique)
 
                     $loadBalancerRules.Add([pscustomobject][ordered]@{
