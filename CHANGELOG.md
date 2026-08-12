@@ -76,6 +76,13 @@ All notable changes to AzureInfrastructureCollector are documented in this file.
 - `Inventory/compute.json` plus nested `summary.compute` output and a dedicated sixth collector stage for Compute
 - six dedicated P4 Pester tests covering query safety, VM normalization, disk/availability topology, unmanaged VHD/image URI minimization, encryption-reference minimization and empty-collection stability
 - `Docs/P4-Compute.md` defining P4 scope, safety/data-minimization boundary, power-state semantics and validation gates
+- P5 `Queries/AVD.kql` using Azure Resource Graph `Resources` for top-level AVD resources and `DesktopVirtualizationResources` for Session Hosts
+- P5 `Collector.AVD.psm1` normalization for Workspaces, Host Pools, Application Groups, Session Hosts and Scaling Plans
+- explicit P5 Resource-ID relationships for Workspace -> Application Group, Application Group -> Host Pool, Host Pool -> Session Host, Session Host -> P4 VM and Scaling Plan -> Host Pool
+- P5 `Inventory/avd.json` plus nested `summary.avd` output and a dedicated seventh collector stage for Azure Virtual Desktop
+- seven dedicated P5 Pester tests covering query safety, Workspace, Host Pool, Application Group, Session Host, Scaling Plan and empty-collection stability
+- P5 data-minimization boundary excluding registration tokens, SSO secret paths, VM templates, raw custom RDP properties, assigned users, user sessions, health/update error details, published application command/file paths and scaling-plan notification free text
+- `Docs/P5-AVD.md` defining P5 scope, Resource Graph table usage, relationships, safety/PII boundary and validation gates
 
 ### Fixed
 
