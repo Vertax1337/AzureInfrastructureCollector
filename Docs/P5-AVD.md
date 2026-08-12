@@ -182,10 +182,10 @@ P5 gilt erst als abgeschlossen, wenn:
 - [x] `Queries/AVD.kql` mit `Resources` und `DesktopVirtualizationResources` implementiert ist
 - [x] `Collector.AVD.psm1` implementiert ist
 - [x] Unit-/Regressionstests für Query-Safety, Workspace, Host Pool, Application Group, Session Host, Scaling Plan und leere Arrays vorhanden sind
-- [ ] `Collect-AzureDocumentation.ps1` P5 vollständig integriert
-- [ ] `Inventory/avd.json` und `summary.avd` im normalen Collector integriert
+- [x] `Collect-AzureDocumentation.ps1` P5 vollständig integriert
+- [x] `Inventory/avd.json` und `summary.avd` im normalen Collector integriert
 - [ ] automatische Pre-Azure-Validierung des finalen P5-Stands mit 0 Testfehlern und `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` erfolgreich
 - [ ] realer P5-Kundenexport erzeugt
 - [ ] `avd.json` gegen Core/P4, Relationships, Orphans, Array-/Schema-Stabilität und Secret-/PII-Leakage geprüft
 
-Bis diese letzten Punkte bestätigt sind, ist P5 implementiert bzw. in Implementierung, aber noch nicht real validiert.
+> **P5 ist implementiert, aber noch nicht real validiert. Durch die P5-Codeänderungen ist die vorherige P4-Laufzeitfreigabe für den aktuellen ausführbaren Stand nicht mehr ausreichend. Vor dem ersten P5-Azure-Lauf muss die automatische Pre-Azure-Validierung erneut erfolgreich sein.**
