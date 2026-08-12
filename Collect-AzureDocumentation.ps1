@@ -28,6 +28,7 @@ $resourceGroupsQueryPath = Join-Path $scriptRoot 'Queries/ResourceGroups.kql'
 $networkQueryPath = Join-Path $scriptRoot 'Queries/Network.kql'
 $computeQueryPath = Join-Path $scriptRoot 'Queries/Compute.kql'
 $avdQueryPath = Join-Path $scriptRoot 'Queries/AVD.kql'
+$avdSessionHostsQueryPath = Join-Path $scriptRoot 'Queries/AVD.SessionHosts.kql'
 
 function Write-CollectorStage {
     [CmdletBinding()]
@@ -301,10 +302,16 @@ finally {
 
 $avdInventory = ConvertTo-CollectorAvdInventory -Rows @()
 Write-CollectorStage -Step 5 -Total $totalStages -Message 'Collecting P5 Azure Virtual Desktop inventory from Azure Resource Graph...'
-Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'AVD: waiting for Azure Resource Graph response...'
 try {
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'AVD: querying top-level resources from Resources...'
     $avdQuery = Get-Content -LiteralPath $avdQueryPath -Raw -Encoding UTF8
-    $avdRows = @(Invoke-CollectorResourceGraph -Query $avdQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
+    $avdTopLevelRows = @(Invoke-CollectorResourceGraph -Query $avdQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
+
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'AVD: querying session hosts from DesktopVirtualizationResources...'
+    $avdSessionHostsQuery = Get-Content -LiteralPath $avdSessionHostsQueryPath -Raw -Encoding UTF8
+    $avdSessionHostRows = @(Invoke-CollectorResourceGraph -Query $avdSessionHostsQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
+
+    $avdRows = @($avdTopLevelRows) + @($avdSessionHostRows)
     $avdRows = @($avdRows | Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup })
 
     # Session hosts are returned from DesktopVirtualizationResources while the
@@ -329,8 +336,8 @@ try {
         -SensitivePropertyPattern $sensitivePattern `
         -SensitiveValuePatterns $sensitiveValuePatterns
 
-    Write-CollectorLog -Path $run.logPath -Level INFO -Message ("P5 AVD inventory collected. Source resources: {0}; workspaces: {1}; host pools: {2}; application groups: {3}; session hosts: {4}; scaling plans: {5}; relationships: {6}." -f $avdRows.Count, $avdInventory.summary.workspaces, $avdInventory.summary.hostPools, $avdInventory.summary.applicationGroups, $avdInventory.summary.sessionHosts, $avdInventory.summary.scalingPlans, $avdInventory.summary.relationships)
-    Write-Host ("[{0}]       AVD source resources: {1}" -f (Get-Date).ToString('HH:mm:ss'), $avdRows.Count)
+    Write-CollectorLog -Path $run.logPath -Level INFO -Message ("P5 AVD inventory collected. Top-level resources: {0}; session hosts: {1}; combined source rows: {2}; workspaces: {3}; host pools: {4}; application groups: {5}; scaling plans: {6}; relationships: {7}." -f $avdTopLevelRows.Count, $avdSessionHostRows.Count, $avdRows.Count, $avdInventory.summary.workspaces, $avdInventory.summary.hostPools, $avdInventory.summary.applicationGroups, $avdInventory.summary.scalingPlans, $avdInventory.summary.relationships)
+    Write-Host ("[{0}]       AVD source resources: {1} top-level + {2} session hosts = {3}" -f (Get-Date).ToString('HH:mm:ss'), $avdTopLevelRows.Count, $avdSessionHostRows.Count, $avdRows.Count)
     Write-Host ("[{0}]       Workspaces/Host Pools/Application Groups: {1}/{2}/{3}" -f (Get-Date).ToString('HH:mm:ss'), $avdInventory.summary.workspaces, $avdInventory.summary.hostPools, $avdInventory.summary.applicationGroups)
     Write-Host ("[{0}]       Session Hosts/Scaling Plans: {1}/{2}" -f (Get-Date).ToString('HH:mm:ss'), $avdInventory.summary.sessionHosts, $avdInventory.summary.scalingPlans)
     Write-Host ("[{0}]       Session Host VM refs: {1}" -f (Get-Date).ToString('HH:mm:ss'), $avdInventory.summary.sessionHostVmReferences)
