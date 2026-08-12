@@ -1,9 +1,13 @@
 [CmdletBinding()]
 param(
     [string]$TenantId,
+
     [string[]]$SubscriptionId,
+
     [string[]]$ResourceGroup,
+
     [string]$OutputPath = './Output',
+
     [switch]$NonInteractive
 )
 
@@ -36,33 +40,19 @@ $backupResourcesQueryPath = Join-Path $scriptRoot 'Queries/Backup.Resources.kql'
 function Write-CollectorStage {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][ValidateRange(1, 20)][int]$Step,
-        [Parameter(Mandatory)][ValidateRange(1, 20)][int]$Total,
-        [Parameter(Mandatory)][string]$Message
+        [Parameter(Mandatory)]
+        [ValidateRange(1, 20)]
+        [int]$Step,
+
+        [Parameter(Mandatory)]
+        [ValidateRange(1, 20)]
+        [int]$Total,
+
+        [Parameter(Mandatory)]
+        [string]$Message
     )
+
     Write-Host ("[{0}] [{1}/{2}] {3}" -f (Get-Date).ToString('HH:mm:ss'), $Step, $Total, $Message)
-}
-
-function Resolve-CollectorRowResourceGroupCasing {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ResourceGroups
-    )
-
-    foreach ($row in @($Rows)) {
-        if ($null -eq $row) { continue }
-        $canonicalResourceGroup = $ResourceGroups |
-            Where-Object {
-                [string]$_.subscriptionId -eq [string]$row.subscriptionId -and
-                [string]$_.name -eq [string]$row.resourceGroup
-            } |
-            Select-Object -First 1
-        if ($canonicalResourceGroup) {
-            $row.resourceGroup = [string]$canonicalResourceGroup.name
-        }
-    }
-    return ,@($Rows)
 }
 
 # Supreme safety rule: no Azure collection starts unless the current executable
@@ -96,7 +86,9 @@ $tenant = Select-CollectorTenant -Tenants $tenants -TenantId $TenantId -NonInter
 $subscriptions = Get-CollectorSubscriptions -TenantId ([string]$tenant.Id)
 $selectedSubscriptions = @(Select-CollectorSubscriptions -Subscriptions $subscriptions -SubscriptionId $SubscriptionId -NonInteractive:$NonInteractive)
 
-if ($selectedSubscriptions.Count -eq 0) { throw 'No subscriptions selected.' }
+if ($selectedSubscriptions.Count -eq 0) {
+    throw 'No subscriptions selected.'
+}
 
 $azureContext = Set-CollectorAzureContext -TenantId ([string]$tenant.Id) -SubscriptionId ([string]$selectedSubscriptions[0].Id)
 $tenantDisplayName = Get-CollectorTenantDisplayName -Tenant $tenant
@@ -122,7 +114,10 @@ $jsonDepth = [int]$config.export.jsonDepth
 $totalStages = 8
 
 $publicReadOnlyVerification = New-CollectorPublicReadOnlyVerification -Verification $readOnlyVerification
-$publicReadOnlyVerification = Protect-CollectorExportValue -Value $publicReadOnlyVerification -SensitivePropertyPattern $sensitivePattern -SensitiveValuePatterns $sensitiveValuePatterns
+$publicReadOnlyVerification = Protect-CollectorExportValue `
+    -Value $publicReadOnlyVerification `
+    -SensitivePropertyPattern $sensitivePattern `
+    -SensitiveValuePatterns $sensitiveValuePatterns
 Export-CollectorJson -InputObject $publicReadOnlyVerification -Path (Join-Path $run.rootPath 'readOnlyVerification.json') -Depth $jsonDepth
 
 $resourceGroups = @()
@@ -135,19 +130,33 @@ try {
     $resourceGroups = @(
         $resourceGroupRows |
             ConvertTo-CollectorResourceGroup -SensitivePropertyPattern $sensitivePattern |
-            ForEach-Object { Protect-CollectorExportValue -Value $_ -SensitivePropertyPattern $sensitivePattern -SensitiveValuePatterns $sensitiveValuePatterns } |
+            ForEach-Object {
+                Protect-CollectorExportValue `
+                    -Value $_ `
+                    -SensitivePropertyPattern $sensitivePattern `
+                    -SensitiveValuePatterns $sensitiveValuePatterns
+            } |
             Sort-Object subscriptionId, name
     )
     Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Collected {0} resource groups." -f $resourceGroups.Count)
     Write-Host ("[{0}]       Resource Groups collected: {1}" -f (Get-Date).ToString('HH:mm:ss'), $resourceGroups.Count)
 }
 catch {
-    $errors.Add([pscustomobject][ordered]@{ module = 'Core.ResourceGroups'; message = $_.Exception.Message })
+    $errorItem = [pscustomobject][ordered]@{
+        module  = 'Core.ResourceGroups'
+        message = $_.Exception.Message
+    }
+    $errors.Add($errorItem)
     Write-CollectorLog -Path $run.logPath -Level ERROR -Message ("Resource-group collection failed: {0}" -f $_.Exception.Message)
     Write-Warning ("Resource Group collection failed: {0}" -f $_.Exception.Message)
 }
-finally { Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed }
+finally {
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
+}
 
+# Default collector behavior is full selected-subscription inventory. Resource-group
+# filtering is opt-in via -ResourceGroup; the normal run must never pause on a hidden
+# Read-Host prompt after Resource Group discovery.
 if ($ResourceGroup -and $ResourceGroup.Count -gt 0) {
     $resourceGroupFilter = @(Select-CollectorResourceGroups -ResourceGroups $resourceGroups -RequestedResourceGroup $ResourceGroup -NonInteractive:$NonInteractive)
 }
@@ -173,20 +182,36 @@ try {
     $resources = @(
         $resourceRows |
             ConvertTo-CollectorResource -SensitivePropertyPattern $sensitivePattern |
-            ForEach-Object { Protect-CollectorExportValue -Value $_ -SensitivePropertyPattern $sensitivePattern -SensitiveValuePatterns $sensitiveValuePatterns } |
+            ForEach-Object {
+                Protect-CollectorExportValue `
+                    -Value $_ `
+                    -SensitivePropertyPattern $sensitivePattern `
+                    -SensitiveValuePatterns $sensitiveValuePatterns
+            } |
             Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup }
     )
-    $resources = @(Resolve-CollectorResourceGroupReferences -Resources $resources -ResourceGroups $resourceGroups | Sort-Object subscriptionId, type, resourceGroup, name, id)
+
+    $resources = @(
+        Resolve-CollectorResourceGroupReferences -Resources $resources -ResourceGroups $resourceGroups |
+            Sort-Object subscriptionId, type, resourceGroup, name, id
+    )
+
     Write-CollectorLog -Path $run.logPath -Level INFO -Message ("Collected {0} resources; Resource Group references canonicalized against ResourceGroups inventory." -f $resources.Count)
     Write-Host ("[{0}]       Resources collected: {1}" -f (Get-Date).ToString('HH:mm:ss'), $resources.Count)
     Write-Host ("[{0}]       Resource Group references: CANONICALIZED" -f (Get-Date).ToString('HH:mm:ss'))
 }
 catch {
-    $errors.Add([pscustomobject][ordered]@{ module = 'Core.Resources'; message = $_.Exception.Message })
+    $errorItem = [pscustomobject][ordered]@{
+        module  = 'Core.Resources'
+        message = $_.Exception.Message
+    }
+    $errors.Add($errorItem)
     Write-CollectorLog -Path $run.logPath -Level ERROR -Message ("Resource collection failed: {0}" -f $_.Exception.Message)
     Write-Warning ("Resource collection failed: {0}" -f $_.Exception.Message)
 }
-finally { Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed }
+finally {
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
+}
 
 $networkInventory = ConvertTo-CollectorNetworkInventory -Rows @()
 Write-CollectorStage -Step 3 -Total $totalStages -Message 'Collecting P3 network topology from Azure Resource Graph...'
@@ -195,10 +220,29 @@ try {
     $networkQuery = Get-Content -LiteralPath $networkQueryPath -Raw -Encoding UTF8
     $networkRows = @(Invoke-CollectorResourceGraph -Query $networkQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
     $networkRows = @($networkRows | Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup })
-    $networkRows = @(Resolve-CollectorRowResourceGroupCasing -Rows $networkRows -ResourceGroups $resourceGroups)
+
+    # Resource Graph can return different Resource Group casing between tables/resource types.
+    # Canonicalize the local network rows against the already normalized RG inventory.
+    foreach ($networkRow in $networkRows) {
+        $canonicalResourceGroup = $resourceGroups |
+            Where-Object {
+                [string]$_.subscriptionId -eq [string]$networkRow.subscriptionId -and
+                [string]$_.name -eq [string]$networkRow.resourceGroup
+            } |
+            Select-Object -First 1
+
+        if ($canonicalResourceGroup) {
+            $networkRow.resourceGroup = [string]$canonicalResourceGroup.name
+        }
+    }
+
     Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status ("Network: normalizing {0} resource rows and relationships..." -f $networkRows.Count)
     $networkInventory = ConvertTo-CollectorNetworkInventory -Rows $networkRows
-    $networkInventory = Protect-CollectorExportValue -Value $networkInventory -SensitivePropertyPattern $sensitivePattern -SensitiveValuePatterns $sensitiveValuePatterns
+    $networkInventory = Protect-CollectorExportValue `
+        -Value $networkInventory `
+        -SensitivePropertyPattern $sensitivePattern `
+        -SensitiveValuePatterns $sensitiveValuePatterns
+
     Write-CollectorLog -Path $run.logPath -Level INFO -Message ("P3 network inventory collected. Source resources: {0}; VNets: {1}; subnets: {2}; NICs: {3}; NSGs: {4}; connections: {5}; relationships: {6}." -f $networkRows.Count, $networkInventory.summary.virtualNetworks, $networkInventory.summary.subnets, $networkInventory.summary.networkInterfaces, $networkInventory.summary.networkSecurityGroups, $networkInventory.summary.connections, $networkInventory.summary.relationships)
     Write-Host ("[{0}]       Network source resources: {1}" -f (Get-Date).ToString('HH:mm:ss'), $networkRows.Count)
     Write-Host ("[{0}]       VNets/Subnets/Peerings: {1}/{2}/{3}" -f (Get-Date).ToString('HH:mm:ss'), $networkInventory.summary.virtualNetworks, $networkInventory.summary.subnets, $networkInventory.summary.peerings)
@@ -206,11 +250,17 @@ try {
     Write-Host ("[{0}]       Network relationships: {1}" -f (Get-Date).ToString('HH:mm:ss'), $networkInventory.summary.relationships)
 }
 catch {
-    $errors.Add([pscustomobject][ordered]@{ module = 'Network.P3a'; message = $_.Exception.Message })
+    $errorItem = [pscustomobject][ordered]@{
+        module  = 'Network.P3a'
+        message = $_.Exception.Message
+    }
+    $errors.Add($errorItem)
     Write-CollectorLog -Path $run.logPath -Level ERROR -Message ("P3 network collection failed: {0}" -f $_.Exception.Message)
     Write-Warning ("P3 network collection failed: {0}" -f $_.Exception.Message)
 }
-finally { Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed }
+finally {
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
+}
 
 $computeInventory = ConvertTo-CollectorComputeInventory -Rows @()
 Write-CollectorStage -Step 4 -Total $totalStages -Message 'Collecting P4 compute inventory from Azure Resource Graph...'
@@ -219,10 +269,28 @@ try {
     $computeQuery = Get-Content -LiteralPath $computeQueryPath -Raw -Encoding UTF8
     $computeRows = @(Invoke-CollectorResourceGraph -Query $computeQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
     $computeRows = @($computeRows | Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup })
-    $computeRows = @(Resolve-CollectorRowResourceGroupCasing -Rows $computeRows -ResourceGroups $resourceGroups)
+
+    # Keep Resource Group casing aligned with the canonical Core inventory.
+    foreach ($computeRow in $computeRows) {
+        $canonicalResourceGroup = $resourceGroups |
+            Where-Object {
+                [string]$_.subscriptionId -eq [string]$computeRow.subscriptionId -and
+                [string]$_.name -eq [string]$computeRow.resourceGroup
+            } |
+            Select-Object -First 1
+
+        if ($canonicalResourceGroup) {
+            $computeRow.resourceGroup = [string]$canonicalResourceGroup.name
+        }
+    }
+
     Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status ("Compute: normalizing {0} resource rows and relationships..." -f $computeRows.Count)
     $computeInventory = ConvertTo-CollectorComputeInventory -Rows $computeRows
-    $computeInventory = Protect-CollectorExportValue -Value $computeInventory -SensitivePropertyPattern $sensitivePattern -SensitiveValuePatterns $sensitiveValuePatterns
+    $computeInventory = Protect-CollectorExportValue `
+        -Value $computeInventory `
+        -SensitivePropertyPattern $sensitivePattern `
+        -SensitiveValuePatterns $sensitiveValuePatterns
+
     Write-CollectorLog -Path $run.logPath -Level INFO -Message ("P4 compute inventory collected. Source resources: {0}; VMs: {1}; managed disks: {2}; availability sets: {3}; relationships: {4}." -f $computeRows.Count, $computeInventory.summary.virtualMachines, $computeInventory.summary.managedDisks, $computeInventory.summary.availabilitySets, $computeInventory.summary.relationships)
     Write-Host ("[{0}]       Compute source resources: {1}" -f (Get-Date).ToString('HH:mm:ss'), $computeRows.Count)
     Write-Host ("[{0}]       VMs/Managed Disks/Availability Sets: {1}/{2}/{3}" -f (Get-Date).ToString('HH:mm:ss'), $computeInventory.summary.virtualMachines, $computeInventory.summary.managedDisks, $computeInventory.summary.availabilitySets)
@@ -230,11 +298,17 @@ try {
     Write-Host ("[{0}]       Compute relationships: {1}" -f (Get-Date).ToString('HH:mm:ss'), $computeInventory.summary.relationships)
 }
 catch {
-    $errors.Add([pscustomobject][ordered]@{ module = 'Compute.P4'; message = $_.Exception.Message })
+    $errorItem = [pscustomobject][ordered]@{
+        module  = 'Compute.P4'
+        message = $_.Exception.Message
+    }
+    $errors.Add($errorItem)
     Write-CollectorLog -Path $run.logPath -Level ERROR -Message ("P4 compute collection failed: {0}" -f $_.Exception.Message)
     Write-Warning ("P4 compute collection failed: {0}" -f $_.Exception.Message)
 }
-finally { Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed }
+finally {
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
+}
 
 $avdInventory = ConvertTo-CollectorAvdInventory -Rows @()
 Write-CollectorStage -Step 5 -Total $totalStages -Message 'Collecting P5 Azure Virtual Desktop inventory from Azure Resource Graph...'
@@ -242,15 +316,36 @@ try {
     Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'AVD: querying top-level resources from Resources...'
     $avdQuery = Get-Content -LiteralPath $avdQueryPath -Raw -Encoding UTF8
     $avdTopLevelRows = @(Invoke-CollectorResourceGraph -Query $avdQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
+
     Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'AVD: querying session hosts from DesktopVirtualizationResources...'
     $avdSessionHostsQuery = Get-Content -LiteralPath $avdSessionHostsQueryPath -Raw -Encoding UTF8
     $avdSessionHostRows = @(Invoke-CollectorResourceGraph -Query $avdSessionHostsQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
+
     $avdRows = @($avdTopLevelRows) + @($avdSessionHostRows)
     $avdRows = @($avdRows | Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup })
-    $avdRows = @(Resolve-CollectorRowResourceGroupCasing -Rows $avdRows -ResourceGroups $resourceGroups)
+
+    # Session hosts are returned from DesktopVirtualizationResources while the
+    # top-level AVD resources come from Resources. Canonicalize RG casing for both.
+    foreach ($avdRow in $avdRows) {
+        $canonicalResourceGroup = $resourceGroups |
+            Where-Object {
+                [string]$_.subscriptionId -eq [string]$avdRow.subscriptionId -and
+                [string]$_.name -eq [string]$avdRow.resourceGroup
+            } |
+            Select-Object -First 1
+
+        if ($canonicalResourceGroup) {
+            $avdRow.resourceGroup = [string]$canonicalResourceGroup.name
+        }
+    }
+
     Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status ("AVD: normalizing {0} resource rows and relationships..." -f $avdRows.Count)
     $avdInventory = ConvertTo-CollectorAvdInventory -Rows $avdRows
-    $avdInventory = Protect-CollectorExportValue -Value $avdInventory -SensitivePropertyPattern $sensitivePattern -SensitiveValuePatterns $sensitiveValuePatterns
+    $avdInventory = Protect-CollectorExportValue `
+        -Value $avdInventory `
+        -SensitivePropertyPattern $sensitivePattern `
+        -SensitiveValuePatterns $sensitiveValuePatterns
+
     Write-CollectorLog -Path $run.logPath -Level INFO -Message ("P5 AVD inventory collected. Top-level resources: {0}; session hosts: {1}; combined source rows: {2}; workspaces: {3}; host pools: {4}; application groups: {5}; scaling plans: {6}; relationships: {7}." -f $avdTopLevelRows.Count, $avdSessionHostRows.Count, $avdRows.Count, $avdInventory.summary.workspaces, $avdInventory.summary.hostPools, $avdInventory.summary.applicationGroups, $avdInventory.summary.scalingPlans, $avdInventory.summary.relationships)
     Write-Host ("[{0}]       AVD source resources: {1} top-level + {2} session hosts = {3}" -f (Get-Date).ToString('HH:mm:ss'), $avdTopLevelRows.Count, $avdSessionHostRows.Count, $avdRows.Count)
     Write-Host ("[{0}]       Workspaces/Host Pools/Application Groups: {1}/{2}/{3}" -f (Get-Date).ToString('HH:mm:ss'), $avdInventory.summary.workspaces, $avdInventory.summary.hostPools, $avdInventory.summary.applicationGroups)
@@ -259,11 +354,17 @@ try {
     Write-Host ("[{0}]       AVD relationships: {1}" -f (Get-Date).ToString('HH:mm:ss'), $avdInventory.summary.relationships)
 }
 catch {
-    $errors.Add([pscustomobject][ordered]@{ module = 'AVD.P5'; message = $_.Exception.Message })
+    $errorItem = [pscustomobject][ordered]@{
+        module  = 'AVD.P5'
+        message = $_.Exception.Message
+    }
+    $errors.Add($errorItem)
     Write-CollectorLog -Path $run.logPath -Level ERROR -Message ("P5 AVD collection failed: {0}" -f $_.Exception.Message)
     Write-Warning ("P5 AVD collection failed: {0}" -f $_.Exception.Message)
 }
-finally { Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed }
+finally {
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
+}
 
 $storageInventory = ConvertTo-CollectorStorageInventory -Rows @()
 $backupInventory = ConvertTo-CollectorBackupInventory -TopLevelRows @() -BackupRows @()
@@ -275,7 +376,10 @@ try {
     $storageQuery = Get-Content -LiteralPath $storageQueryPath -Raw -Encoding UTF8
     $storageRows = @(Invoke-CollectorResourceGraph -Query $storageQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
     $storageRows = @($storageRows | Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup })
-    $storageRows = @(Resolve-CollectorRowResourceGroupCasing -Rows $storageRows -ResourceGroups $resourceGroups)
+    foreach ($storageRow in $storageRows) {
+        $canonicalResourceGroup = $resourceGroups | Where-Object { [string]$_.subscriptionId -eq [string]$storageRow.subscriptionId -and [string]$_.name -eq [string]$storageRow.resourceGroup } | Select-Object -First 1
+        if ($canonicalResourceGroup) { $storageRow.resourceGroup = [string]$canonicalResourceGroup.name }
+    }
     $storageInventory = ConvertTo-CollectorStorageInventory -Rows $storageRows
     $storageInventory = Protect-CollectorExportValue -Value $storageInventory -SensitivePropertyPattern $sensitivePattern -SensitiveValuePatterns $sensitiveValuePatterns
     Write-CollectorLog -Path $run.logPath -Level INFO -Message ("P6 Storage collected. Accounts: {0}; relationships: {1}." -f $storageInventory.summary.storageAccounts, $storageInventory.summary.relationships)
@@ -292,7 +396,10 @@ try {
     $keyVaultQuery = Get-Content -LiteralPath $keyVaultQueryPath -Raw -Encoding UTF8
     $keyVaultRows = @(Invoke-CollectorResourceGraph -Query $keyVaultQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
     $keyVaultRows = @($keyVaultRows | Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup })
-    $keyVaultRows = @(Resolve-CollectorRowResourceGroupCasing -Rows $keyVaultRows -ResourceGroups $resourceGroups)
+    foreach ($keyVaultRow in $keyVaultRows) {
+        $canonicalResourceGroup = $resourceGroups | Where-Object { [string]$_.subscriptionId -eq [string]$keyVaultRow.subscriptionId -and [string]$_.name -eq [string]$keyVaultRow.resourceGroup } | Select-Object -First 1
+        if ($canonicalResourceGroup) { $keyVaultRow.resourceGroup = [string]$canonicalResourceGroup.name }
+    }
     $keyVaultInventory = ConvertTo-CollectorKeyVaultInventory -Rows $keyVaultRows
     $keyVaultInventory = Protect-CollectorExportValue -Value $keyVaultInventory -SensitivePropertyPattern $sensitivePattern -SensitiveValuePatterns $sensitiveValuePatterns
     Write-CollectorLog -Path $run.logPath -Level INFO -Message ("P6 Key Vault collected. Vaults: {0}; relationships: {1}." -f $keyVaultInventory.summary.keyVaults, $keyVaultInventory.summary.relationships)
@@ -308,13 +415,17 @@ try {
     Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'P6 Backup: querying vaults from Resources...'
     $backupTopLevelQuery = Get-Content -LiteralPath $backupTopLevelQueryPath -Raw -Encoding UTF8
     $backupTopLevelRows = @(Invoke-CollectorResourceGraph -Query $backupTopLevelQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
+
     Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'P6 Backup: querying policies and protected items from RecoveryServicesResources...'
     $backupResourcesQuery = Get-Content -LiteralPath $backupResourcesQueryPath -Raw -Encoding UTF8
     $backupRows = @(Invoke-CollectorResourceGraph -Query $backupResourcesQuery -SubscriptionId $subscriptionIds -PageSize $pageSize)
+
     $backupTopLevelRows = @($backupTopLevelRows | Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup })
     $backupRows = @($backupRows | Where-Object { $resourceGroupFilter.Count -eq 0 -or $resourceGroupFilter -contains $_.resourceGroup })
-    $backupTopLevelRows = @(Resolve-CollectorRowResourceGroupCasing -Rows $backupTopLevelRows -ResourceGroups $resourceGroups)
-    $backupRows = @(Resolve-CollectorRowResourceGroupCasing -Rows $backupRows -ResourceGroups $resourceGroups)
+    foreach ($backupRow in @($backupTopLevelRows) + @($backupRows)) {
+        $canonicalResourceGroup = $resourceGroups | Where-Object { [string]$_.subscriptionId -eq [string]$backupRow.subscriptionId -and [string]$_.name -eq [string]$backupRow.resourceGroup } | Select-Object -First 1
+        if ($canonicalResourceGroup) { $backupRow.resourceGroup = [string]$canonicalResourceGroup.name }
+    }
     $backupInventory = ConvertTo-CollectorBackupInventory -TopLevelRows $backupTopLevelRows -BackupRows $backupRows
     $backupInventory = Protect-CollectorExportValue -Value $backupInventory -SensitivePropertyPattern $sensitivePattern -SensitiveValuePatterns $sensitiveValuePatterns
     Write-CollectorLog -Path $run.logPath -Level INFO -Message ("P6 Backup collected. Recovery Services vaults: {0}; Backup Vaults: {1}; policies: {2}; Recovery protected items: {3}; Data Protection instances: {4}; relationships: {5}." -f $backupInventory.summary.recoveryServicesVaults, $backupInventory.summary.backupVaults, $backupInventory.summary.backupPolicies, $backupInventory.summary.recoveryProtectedItems, $backupInventory.summary.dataProtectionBackupInstances, $backupInventory.summary.relationships)
@@ -327,7 +438,9 @@ catch {
     Write-CollectorLog -Path $run.logPath -Level ERROR -Message ("P6 Backup collection failed: {0}" -f $_.Exception.Message)
     Write-Warning ("P6 Backup collection failed: {0}" -f $_.Exception.Message)
 }
-finally { Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed }
+finally {
+    Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
+}
 
 Write-CollectorStage -Step 7 -Total $totalStages -Message 'Writing normalized inventory JSON files...'
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Writing resourceGroups.json...'
@@ -357,7 +470,10 @@ Add-Member -InputObject $summary -NotePropertyName avd -NotePropertyValue $avdIn
 Add-Member -InputObject $summary -NotePropertyName storage -NotePropertyValue $storageInventory.summary -Force
 Add-Member -InputObject $summary -NotePropertyName backup -NotePropertyValue $backupInventory.summary -Force
 Add-Member -InputObject $summary -NotePropertyName keyVault -NotePropertyValue $keyVaultInventory.summary -Force
-$summary = Protect-CollectorExportValue -Value $summary -SensitivePropertyPattern $sensitivePattern -SensitiveValuePatterns $sensitiveValuePatterns
+$summary = Protect-CollectorExportValue `
+    -Value $summary `
+    -SensitivePropertyPattern $sensitivePattern `
+    -SensitiveValuePatterns $sensitiveValuePatterns
 Export-CollectorJson -InputObject $summary -Path (Join-Path $run.rootPath 'summary.json') -Depth $jsonDepth
 
 $completedAt = Get-Date
@@ -365,7 +481,10 @@ $status = if ($errors.Count -eq 0) { 'Success' } elseif ($resources.Count -gt 0 
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Status 'Building manifest.json...'
 $manifest = New-CollectorManifest -Config $config -Tenant $tenant -Subscriptions @($selectedSubscriptions) -AzureContext $azureContext -StartedAt $startedAt -CompletedAt $completedAt -Status $status -Summary $summary -Errors @($errors) -ResourceGroupFilter $resourceGroupFilter
 $manifest = New-CollectorPublicManifest -Manifest $manifest
-$manifest = Protect-CollectorExportValue -Value $manifest -SensitivePropertyPattern $sensitivePattern -SensitiveValuePatterns $sensitiveValuePatterns
+$manifest = Protect-CollectorExportValue `
+    -Value $manifest `
+    -SensitivePropertyPattern $sensitivePattern `
+    -SensitiveValuePatterns $sensitiveValuePatterns
 Export-CollectorJson -InputObject $manifest -Path (Join-Path $run.rootPath 'manifest.json') -Depth $jsonDepth
 Write-Progress -Id 1 -Activity 'AzureInfrastructureCollector' -Completed
 
@@ -387,4 +506,6 @@ Write-Host ("Errors: {0}" -f $errors.Count)
 Write-Host ("Duration: {0:mm\:ss}" -f $duration)
 Write-Host ("Export completed: {0}" -f $run.rootPath)
 
-if ($status -eq 'Failed') { exit 1 }
+if ($status -eq 'Failed') {
+    exit 1
+}
