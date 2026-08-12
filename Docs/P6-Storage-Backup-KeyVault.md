@@ -275,11 +275,64 @@ Phase 7 schreibt zusätzlich `storage.json`, `backup.json` und `keyVault.json`. 
 
 Die bereits real validierten P3-/P4-/P5-Module und Queries wurden für P6 nicht verändert. P6 wird ausschließlich zusätzlich hinter P5 integriert.
 
-## Statische Read-only-Gegenprüfung
+## Read-only-Verifikation und finaler Real-Run 2026-08-12
 
-Der aktuelle P6-Diff führt ausschließlich zusätzliche Azure-Resource-Graph-Abfragen über den vorhandenen `Invoke-CollectorResourceGraph`-/`Search-AzGraph`-Pfad ein. Im P6-Ausführungspfad wurden keine neuen Az-Fachcmdlets, REST-/Web-Aufrufe, Azure-CLI-Befehle, SDK-Schreibpfade oder Data-Plane-Key-/Secret-Abfragen ergänzt.
+Der finale P6-Stand wurde vor Azure vollständig validiert:
 
-Dies ist ausdrücklich nur die **statische** Gegenprüfung. Durch die neuen ausführbaren P6-Dateien ist die Laufzeitfreigabe des zuvor validierten P5-Stands für den aktuellen `main` nicht mehr ausreichend. Vor einem realen P6-Azure-Lauf muss die komplette automatische Pre-Azure-Validierung erneut erfolgreich sein.
+- PowerShell 7.6.4
+- Pester 6.0.1
+- 15 Testdateien
+- 73/73 Tests bestanden
+- 0 fehlgeschlagene / 0 übersprungene Tests
+- initiales Read-only-Gate `READ-ONLY VERIFIED`
+- finales Read-only-Gate `READ-ONLY VERIFIED`
+- Gesamtstatus `READY FOR AZURE TEST`
+- vor Azure `Azure access performed: NO`
+- keine Administrator-Elevation
+
+Der anschließende Kundenexport lief mit `Success` und 0 Collector-Fehlern. Die P6-Ergebnisse:
+
+- 8 Storage Accounts
+- 1 Storage-zu-Subnetz-Relationship
+- 1 Key Vault
+- 0 Key-Vault-Relationships
+- 2 Recovery Services Vaults
+- 0 Data Protection Backup Vaults
+- 8 Backup Policies
+- 4 Recovery Services Protected Items
+- 0 Data Protection Backup Instances
+- 20 Backup-Relationships
+- insgesamt 21 P6-Relationships
+
+Die 8 Storage Accounts, das Key Vault und beide Recovery Services Vaults stimmen 1:1 mit dem Core-Inventar überein.
+
+Alle Backup-Relationships wurden gegen das bekannte Inventar geprüft:
+
+- 8/8 `ContainsBackupPolicy` gültig
+- 4/4 `ContainsProtectedItem` gültig
+- 4/4 `UsesBackupPolicy` gültig
+- 4/4 `ProtectsResource` gültig
+- 0 doppelte Relationships
+- 0 Orphan-Quellen
+- 0 Orphan-Ziele
+
+Von den vier geschützten Ressourcen sind drei vorhandene P4-VMs und eine ein vorhandener Storage Account. Die vier Last-Recovery-Point-Werte sind als stabile UTC-/ISO-8601-Werte exportiert. Fehlende optionale Azure-Werte werden nicht ergänzt oder aus Namen hergeleitet.
+
+Der finale Export wurde zusätzlich auf Datenform und Secret-Leakage geprüft:
+
+- `summary.storage`, `summary.backup` und `summary.keyVault` stimmen jeweils exakt mit den Fachdateien überein
+- keine verschachtelten Arrays
+- keine PowerShell-ETS-/`Length`-/`Rank`-/`SyncRoot`-Artefakte
+- keine Resource-Group-Casing-Abweichungen
+- keine Account Keys, SAS/SharedAccessSignature oder Connection Strings
+- keine Private Keys/PFX/JWTs
+- keine `datasourceAuthCredentials` oder Secret-Store-Werte
+- keine Key-/Secret-/CMK-URIs
+- keine `accessPolicies`, Object-/Tenant-IDs aus Access Policies
+- keine eingebetteten Credentials
+- keine E-Mail-/UPN-Werte
+
+`readOnlyVerification.json` bestätigt für den finalen Export `READ-ONLY VERIFIED`, `verified: true`, 0 Violations sowie `NONE DETECTED` für Azure Resource Mutations, Azure Data Mutations, Control-Plane Writes und Data-Plane Writes.
 
 ## Fehler- und Statussemantik
 
@@ -298,9 +351,9 @@ Protection State und Last Recovery Point sind Momentaufnahmen des Erfassungszeit
 - [x] Unit-/Regressionstests für Query-Safety, Normalisierung, Relationships, Array-Shape und Empty Arrays ergänzt
 - [x] P6 vollständig in `Collect-AzureDocumentation.ps1` integriert
 - [x] `storage.json`, `backup.json`, `keyVault.json` und Summary-Bereiche im normalen Collector integriert
-- [x] statische Read-only-Gegenprüfung des finalen ausführbaren P6-Stands: kein neuer Azure-Write-/REST-/CLI-/SDK-/Data-Plane-Secret-Pfad erkannt
-- [ ] automatische Pre-Azure-Validierung mit 0 Testfehlern, `READ-ONLY VERIFIED` und `READY FOR AZURE TEST`
-- [ ] realer P6-Kundenexport erzeugt
-- [ ] P6-Exports gegen Core/P3/P4/P5, Relationships, Orphans, Array-/Schema-Stabilität und Secret-Leakage geprüft
+- [x] statische Read-only-Gegenprüfung des finalen ausführbaren P6-Stands
+- [x] automatische Pre-Azure-Validierung erfolgreich: 73/73, `READ-ONLY VERIFIED`, `READY FOR AZURE TEST`
+- [x] realer P6-Kundenexport erfolgreich: `Success`, 0 Fehler
+- [x] P6-Exports gegen Core/P3/P4/P5, Relationships, Orphans, Array-/Schema-Stabilität und Secret-Leakage geprüft
 
-> **P6 ist vollständig implementiert und statisch gegengeprüft, aber noch nicht für Azure freigegeben bzw. real validiert. Der aktuelle ausführbare Stand muss vor Azure erneut die vollständige automatische Pre-Azure-Validierung bestehen.**
+> **P6 Storage / Backup / Key Vault ist für den aktuellen Entwicklungsstand abgeschlossen. Data-Protection-Backup-Vault-/Backup-Instance-Positivpfade und weitere heterogene Storage-/Key-Vault-Netzwerkszenarien bleiben Bestandteil späterer P10-Integrationstests und blockieren P7 nicht.**
