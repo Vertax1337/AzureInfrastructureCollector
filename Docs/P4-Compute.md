@@ -142,9 +142,9 @@ P4 gilt erst als abgeschlossen, wenn:
 - [x] `Queries/Compute.kql` implementiert ist
 - [x] `Collector.Compute.psm1` implementiert ist
 - [x] Unit-/Regressionstests für Query, VM, Disks, Availability Sets, Secret-/URI-Minimierung und leere Arrays vorhanden sind
-- [ ] `Collect-AzureDocumentation.ps1` P4 vollständig integriert
+- [x] `Collect-AzureDocumentation.ps1` P4 vollständig integriert
 - [ ] automatische Pre-Azure-Validierung des finalen P4-Stands mit 0 Testfehlern und `READ-ONLY VERIFIED` / `READY FOR AZURE TEST` erfolgreich
 - [ ] realer P4-Kundenexport erzeugt
 - [ ] `compute.json` gegen Core-Inventar, Relationships, Orphans, Array-/Schema-Stabilität und Secret Leakage geprüft
 
-Bis diese letzten Punkte bestätigt sind, ist P4 implementiert bzw. in Implementierung, aber noch nicht real validiert.
+Bis diese letzten Punkte bestätigt sind, ist P4 implementiert, aber noch nicht real validiert.
