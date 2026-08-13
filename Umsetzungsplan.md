@@ -4,7 +4,7 @@
 > **Repository:** `Vertax1337/AzureInfrastructureCollector`  
 > **Default Branch:** `main`  
 > **Dokumentstatus:** Verbindlicher Entwicklungsplan  
-> **Stand:** 2026-08-12  
+> **Stand:** 2026-08-13  
 > **Initiale Zielversion:** `0.1.0`
 
 ---
@@ -148,6 +148,9 @@ Collect-AzureDocumentation.ps1
    +--> P3 Network-Normalisierung / Relationships (P3a + P3b)
    +--> P4 Compute-Normalisierung / Relationships
    +--> P5 AVD-Normalisierung / Relationships
+   +--> P6 Storage-Normalisierung / Relationships
+   +--> P6 Backup-Normalisierung / Relationships
+   +--> P6 Key-Vault-Normalisierung / Relationships
    +--> Collector.ExportSecurity
    |      +--> sensitive Property-Namen redigieren
    |      +--> sensitive Wertmuster redigieren
@@ -165,6 +168,9 @@ Normalisiertes und gehärtetes JSON-Modell
    +--> Inventory/network.json
    +--> Inventory/compute.json
    +--> Inventory/avd.json
+   +--> Inventory/storage.json
+   +--> Inventory/backup.json
+   +--> Inventory/keyVault.json
    +--> Logs
 ```
 
@@ -358,6 +364,15 @@ Für P5 gilt zusätzlich:
 - veröffentlichte Application-Child-Ressourcen mit File Paths/Command-Line-Argumenten gehören nicht zum P5-Scope,
 - Scaling-Plan-Benachrichtigungstexte werden nicht exportiert.
 
+Für P6 gilt zusätzlich:
+
+- Storage Account Keys, `listKeys`, SAS/SharedAccessSignature und Connection Strings werden nicht abgefragt/exportiert,
+- vollständige Storage-Rohproperties und CMK-/Key-Vault-Key-URIs werden nicht exportiert,
+- Backup `datasourceAuthCredentials`, Secret-Store-Werte, CMK-Key-Material und Identity-Detailobjekte werden nicht exportiert,
+- Backup-Job-Historie und Restore Requests gehören nicht zum P6-Scope,
+- Key Vault Secret Values, Key Material, Certificate Private Keys/PFX und Keys-/Secrets-/Certificates-Data-Plane-Listen werden nicht abgefragt/exportiert,
+- Key-Vault-`accessPolicies`, Object-/Tenant-IDs aus Access Policies, Vault URI sowie Secret-/Key-URIs werden nicht exportiert.
+
 ## 5.6 Reproduzierbarkeit
 
 Stabile Felder, konsistente Dateinamen, definierte Sortierung, ISO-8601-Zeitstempel, Resource IDs und Schema-/Collector-Versionen. Resource-Group-Referenzen in Ressourcen werden subscriptionbezogen gegen `resourceGroups.json` kanonisiert.
@@ -389,6 +404,7 @@ AzureInfrastructureCollector/
 |   +-- Collector.AVD.psm1
 |   +-- Collector.Storage.psm1
 |   +-- Collector.Backup.psm1
+|   +-- Collector.KeyVault.psm1
 |   +-- Collector.Security.psm1
 |   +-- Collector.Monitoring.psm1
 |   +-- Collector.Automation.psm1
@@ -399,6 +415,11 @@ AzureInfrastructureCollector/
 |   +-- Network.kql
 |   +-- Compute.kql
 |   +-- AVD.kql
+|   +-- AVD.SessionHosts.kql
+|   +-- Storage.kql
+|   +-- KeyVault.kql
+|   +-- Backup.TopLevel.kql
+|   +-- Backup.Resources.kql
 +-- Config/
 +-- Schemas/
 +-- Tests/
@@ -409,6 +430,7 @@ AzureInfrastructureCollector/
 |   +-- P3-Network.md
 |   +-- P4-Compute.md
 |   +-- P5-AVD.md
+|   +-- P6-Storage-Backup-KeyVault.md
 ```
 
 ---
@@ -528,7 +550,52 @@ P5 erfasst kundengenerisch:
 Top-Level-AVD-Ressourcen werden aus `Resources` gelesen; Session Hosts werden über `DesktopVirtualizationResources` erfasst. P5 exportiert keine User Sessions, Assigned Users, Registration Tokens, SSO-Secret-Pfade, VM Templates, rohe RDP-Freitexte, Application-Command/File-Paths, Health-/Update-Fehlermeldungstexte oder Scaling-Notification-Freitexte.
 
 ## Storage / Backup / Key Vault
-Storage-Konfigurationsmetadaten, Backup-Vaults/-Policies/-Protected Items und Key-Vault-Konfiguration. Keine Blob-/Dateiinhalte, Backup-Inhalte, Secrets, Keys oder Private Keys.
+
+P6 besteht aus drei getrennten normalisierten Domänen.
+
+### Storage
+
+Erfasst werden `Microsoft.Storage/storageAccounts` mit Konfigurationsmetadaten wie Kind, SKU/Redundanz, Access Tier, TLS/HTTPS, Public Network Access, Shared-Key-/Blob-Public-Access-Konfiguration, OAuth-Default, HNS/Data Lake Gen2, NFS/SFTP und Network ACLs. VNet/Subnet-Regeln werden als ARM IDs normalisiert.
+
+Beziehung:
+
+```text
+Storage Account -> AllowsSubnet -> P3 Subnet
+```
+
+### Backup
+
+Top-Level-Vaults werden aus `Resources` gelesen; Policies und Protected Items/Backup Instances werden separat aus `RecoveryServicesResources` gelesen und erst lokal zusammengeführt.
+
+Erfasst werden:
+
+- Recovery Services Vaults,
+- Data Protection Backup Vaults,
+- Backup Policies,
+- Recovery Services Protected Items,
+- Data Protection Backup Instances,
+- Protection State und Last Recovery Point als Momentaufnahme,
+- Resource-ID-basierte Policy-, Vault- und Protected-Resource-Beziehungen.
+
+Beziehungen:
+
+```text
+Vault -> ContainsBackupPolicy -> Backup Policy
+Recovery Services Vault -> ContainsProtectedItem -> Protected Item
+Backup Vault -> ContainsBackupInstance -> Backup Instance
+Protected Item / Backup Instance -> UsesBackupPolicy -> Backup Policy
+Protected Item / Backup Instance -> ProtectsResource -> Azure Resource
+```
+
+### Key Vault
+
+Erfasst werden ausschließlich Vault-Konfigurationsmetadaten wie SKU, RBAC-vs-Access-Policy-Modell, Soft Delete, Purge Protection, Retention, Public Network Access und Network ACLs. Key-/Secret-/Certificate-Inhalte werden nicht gelesen.
+
+Beziehung:
+
+```text
+Key Vault -> AllowsSubnet -> P3 Subnet
+```
 
 ## Security / Governance
 RBAC Role Assignments, Role-Definition-Referenzen, Locks, Policy-/Initiative-Assignments; personenbezogene Identitätsdaten werden minimiert.
@@ -551,6 +618,9 @@ Log Analytics, Diagnostic Settings, Action Groups, Alerts, Automation Accounts, 
 |   +-- network.json
 |   +-- compute.json
 |   +-- avd.json
+|   +-- storage.json
+|   +-- backup.json
+|   +-- keyVault.json
 +-- Logs/
 ```
 
@@ -590,18 +660,41 @@ Resource ID ist der bevorzugte technische Primärschlüssel. Arrays werden stabi
 - `relationships`,
 - eine AVD-Summary mit Ressourcen-, Referenz-, Schedule-, Start-VM-on-Connect- und Relationship-Counts.
 
+`Inventory/storage.json` enthält nach P6 insbesondere:
+
+- `storageAccounts`,
+- `relationships`,
+- eine Storage-Summary.
+
+`Inventory/backup.json` enthält nach P6 insbesondere:
+
+- `recoveryServicesVaults`,
+- `backupVaults`,
+- `backupPolicies`,
+- `recoveryProtectedItems`,
+- `dataProtectionBackupInstances`,
+- `relationships`,
+- eine Backup-Summary.
+
+`Inventory/keyVault.json` enthält nach P6 insbesondere:
+
+- `keyVaults`,
+- `relationships`,
+- eine Key-Vault-Summary.
+
 Export-Minimierung:
 
 - lokale Repository-/Arbeitsplatzpfade werden nicht in `readOnlyVerification.json` ausgegeben,
 - das ausführende Azure-Konto/UPN wird nicht in `manifest.json` ausgegeben,
 - Tenant-, Subscription- und Resource IDs bleiben als technische Korrelationsschlüssel erhalten,
-- Network-, Compute- und AVD-Abfragen projizieren nur explizit freigegebene Felder,
+- Network-, Compute-, AVD-, Storage-, Backup- und Key-Vault-Abfragen projizieren nur explizit freigegebene Felder,
 - Connection Shared Keys werden nicht abgefragt,
 - Private-Link-Freitext wird nicht normalisiert/exportiert,
 - Application-Gateway-Zertifikatsmaterial wird nicht normalisiert/exportiert,
 - Azure-Firewall-Regelkollektionen werden in P3b nicht normalisiert/exportiert,
 - P4 exportiert kein `osProfile`, keine VM-Extensions/-ProtectedSettings, keine Unmanaged-VHD-/Image-URIs und keine Key-/Secret-URLs oder Disk-Encryption-Detailobjekte,
-- P5 exportiert keine Registration-/SSO-Secrets, VM-Template-/RDP-Freitexte, Assigned Users/User Sessions, Health-/Update-Fehlertexte, Application-Ausführungspfade oder Scaling-Notification-Texte.
+- P5 exportiert keine Registration-/SSO-Secrets, VM-Template-/RDP-Freitexte, Assigned Users/User Sessions, Health-/Update-Fehlertexte, Application-Ausführungspfade oder Scaling-Notification-Texte,
+- P6 exportiert keine Storage Keys/SAS/Connection Strings, keine Backup-Credentials/Secret-Store-Werte/CMK-Key-Material und keine Key-Vault-Secret-/Key-/Certificate-Inhalte oder Access-Policy-Identitätsdetails.
 
 ---
 
@@ -675,13 +768,20 @@ Host Pool -> ContainsSessionHost -> Session Host
 Session Host -> BackedByVm -> VM
 Scaling Plan -> TargetsHostPool -> Host Pool
 
+Storage Account -> AllowsSubnet -> Subnet
+Key Vault -> AllowsSubnet -> Subnet
+Vault -> ContainsBackupPolicy -> Backup Policy
+Recovery Services Vault -> ContainsProtectedItem -> Protected Item
+Backup Vault -> ContainsBackupInstance -> Backup Instance
+Protected Item / Backup Instance -> UsesBackupPolicy -> Backup Policy
+Protected Item / Backup Instance -> ProtectsResource -> Azure Resource
+
 Diagnostic Setting -> Destination
-Backup -> Protected Resource
 ```
 
-P3, P4 und P5 verwenden derzeit fachmodulspezifische Relationship-Arrays. P9 vereinheitlicht später die Relationship-Schemata aller Fachmodule.
+P3, P4, P5 und P6 verwenden derzeit fachmodulspezifische Relationship-Arrays. P9 vereinheitlicht später die Relationship-Schemata aller Fachmodule.
 
-Azure Resource IDs bleiben der bevorzugte technische Schlüssel. Für ausgewählte untergeordnete Azure-Objekte ohne eigene Resource ID dürfen ausschließlich deterministische Child-IDs unterhalb der Azure-Parent-ID erzeugt werden; keine Namensheuristik darf eine Beziehung zu einer externen Ressource erfinden. Für P5 wird die Parent-Host-Pool-ID eines Session Hosts deterministisch aus dessen eigener ARM-ID abgeleitet; die VM-Beziehung stammt ausschließlich aus der von Azure gelieferten Session-Host-`resourceId`.
+Azure Resource IDs bleiben der bevorzugte technische Schlüssel. Für ausgewählte untergeordnete Azure-Objekte ohne eigene Resource ID dürfen ausschließlich deterministische Child-IDs unterhalb der Azure-Parent-ID erzeugt werden; keine Namensheuristik darf eine Beziehung zu einer externen Ressource erfinden. Für P5 wird die Parent-Host-Pool-ID eines Session Hosts deterministisch aus dessen eigener ARM-ID abgeleitet; die VM-Beziehung stammt ausschließlich aus der von Azure gelieferten Session-Host-`resourceId`. Für P6 werden Backup-Policy-, Vault- und Protected-Resource-Beziehungen ausschließlich aus Azure gelieferten ARM IDs aufgebaut.
 
 ---
 
@@ -689,7 +789,7 @@ Azure Resource IDs bleiben der bevorzugte technische Schlüssel. Für ausgewähl
 
 Logs enthalten Zeitstempel, Level, Modul/Aktion und Ergebnis; niemals Secrets oder Access Tokens.
 
-Der normale Collector zeigt zusätzlich sichtbare Phasenmeldungen und Objektzähler, damit längere ARG-/Exportvorgänge nicht wie ein stiller Hänger wirken. P3 Network wird in Phase 3 von 7, P4 Compute in Phase 4 von 7 und P5 AVD in Phase 5 von 7 erfasst; danach folgen Export und Summary/Manifest.
+Der normale Collector zeigt zusätzlich sichtbare Phasenmeldungen und Objektzähler, damit längere ARG-/Exportvorgänge nicht wie ein stiller Hänger wirken. Der aktuelle P6-Stand besitzt 8 Phasen: P3 Network wird in Phase 3/8, P4 Compute in Phase 4/8, P5 AVD in Phase 5/8 und P6 Storage / Backup / Key Vault in Phase 6/8 erfasst; Phase 7/8 schreibt die normalisierten Inventardateien und Phase 8/8 erzeugt Summary/Manifest.
 
 Kritische Fehler:
 
@@ -701,7 +801,7 @@ Kritische Fehler:
 - Tenant/Subscription nicht erreichbar,
 - Core-Export nicht möglich.
 
-Ein isolierter P3-Netzwerk-, P4-Compute- oder P5-AVD-Fehler darf bei erfolgreichem Core-Inventar zu `PartialSuccess` führen, nicht zu einem stillen Verlust des Core-Exports.
+Ein isolierter P3-Netzwerk-, P4-Compute-, P5-AVD- oder P6-Storage-/Backup-/Key-Vault-Fehler darf bei erfolgreichem Core-Inventar zu `PartialSuccess` führen, nicht zu einem stillen Verlust des Core-Exports. P6 besitzt innerhalb der Phase getrennte Fehlergrenzen für Storage, Backup und Key Vault.
 
 Exit-Code-Kategorien:
 
@@ -726,10 +826,10 @@ Exit-Code-Kategorien:
 Der Collector benötigt keine KI.
 
 ```text
-Azure -> Collector -> JSON -> AI Documentation Pipeline -> Markdown/DOCX/PDF/Diagramme
+Azure -> Collector -> JSON -> DocumentationEngine / AI Documentation Pipeline -> Markdown/DOCX/PDF/Diagramme
 ```
 
-Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere sollen Beziehungen soweit technisch möglich explizit als Resource-ID-Relationships vorliegen und nicht aus Namenskonventionen erraten werden.
+Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere sollen Beziehungen soweit technisch möglich explizit als Resource-ID-Relationships vorliegen und nicht aus Namenskonventionen erraten werden. Die eigentliche Dokumentations-/Diagrammlogik gehört nicht in den Collector.
 
 ---
 
@@ -869,24 +969,48 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 
 ## P5 – AVD
 - [x] Architektur und Sicherheits-/PII-Minimierungsgrenze dokumentiert (`Docs/P5-AVD.md`)
-- [x] `Queries/AVD.kql` für Workspaces, Host Pools, Application Groups, Scaling Plans und Session Hosts implementiert
-- [x] Session Hosts über Azure Resource Graph `DesktopVirtualizationResources` integriert; kein zusätzlicher AVD-Cmdlet-/REST-/CLI-/SDK-Pfad
+- [x] `Queries/AVD.kql` für Workspaces, Host Pools, Application Groups und Scaling Plans implementiert
+- [x] `Queries/AVD.SessionHosts.kql` für Session Hosts über `DesktopVirtualizationResources` implementiert; kein Cross-Table-`union`
+- [x] kein zusätzlicher AVD-Cmdlet-/REST-/CLI-/SDK-Pfad
 - [x] `Collector.AVD.psm1` für AVD-Normalisierung und Resource-ID-Relationships implementiert
 - [x] Workspace-/Application-Group-Referenzen, Host-Pool-Betriebseinstellungen und Start VM on Connect implementiert
 - [x] Session-Host-Status-/Session-/Agent-/OS-/Heartbeat-Metadaten sowie direkte P4-VM-Resource-ID implementiert
+- [x] Session-Host-Zeitstempel lokal invariant als UTC/ISO-8601 normalisiert
 - [x] Scaling-Plan-Host-Pool-Referenzen und sichere technische Schedule-Parameter implementiert
 - [x] `Inventory/avd.json` und `summary.avd` in den normalen Collector integriert
-- [x] P5 als Phase 5 von 7 in sichtbare Collector-Ausgabe und Fehler-/PartialSuccess-Pfad integriert
-- [x] sieben dedizierte P5-Unit-/Regressionstests für Query-Safety, Workspace, Host Pool, Application Group, Session Host, Scaling Plan und leere Arrays ergänzt
+- [x] P5 als Phase 5 des aktuellen Collector-Ablaufs integriert
+- [x] Unit-/Regressionstests für Query-Safety, Query-Split, UTC-/ISO-Zeitstempel, Workspace, Host Pool, Application Group, Session Host, Scaling Plan und leere Arrays ergänzt
 - [x] sensitive/PII-haltige AVD-Pfade bewusst ausgeschlossen: Registration Tokens, SSO-Secret-Pfade, VM Templates, rohe RDP-Freitexte, Assigned Users/User Sessions, Health-/Update-Fehlerdetails, Application-Ausführungspfade und Scaling-Notification-Texte
 - [x] statische Read-only-Gegenprüfung: kein neues Azure-Cmdlet, kein REST-/CLI-/SDK-Schreibpfad; bestehender `Invoke-CollectorResourceGraph`/`Search-AzGraph`-Pfad wird wiederverwendet
-- [ ] automatische Pre-Azure-Validierung des finalen P5-Stands erfolgreich (`READ-ONLY VERIFIED`, 0 Testfehler, `READY FOR AZURE TEST`)
-- [ ] erster P5-Real-Export erzeugt und `avd.json` gegen Core/P4, Relationships, Orphans, Array-/Schema-Stabilität und Secret-/PII-Leakage geprüft
+- [x] automatische Pre-Azure-Validierung des finalen P5-Stands erfolgreich: PowerShell 7.6.4, Pester 6.0.1, 12 Testdateien, 62/62 Tests, beide Gates `READ-ONLY VERIFIED`, `READY FOR AZURE TEST`, vor Azure `Azure access performed: NO`, keine Administrator-Elevation
+- [x] finaler P5-Real-Export 2026-08-12 erfolgreich: 4 Top-Level-AVD-Ressourcen + 1 Session Host = 5 Quellzeilen, 1 Workspace, 1 Host Pool, 2 Application Groups, 1 Session Host, 0 Scaling Plans, 6 Relationships, 0 Fehler, `Success`
+- [x] `avd.json` gegen Core/P4 und Export-Härtung geprüft: SessionHost->VM korrekt, 0 doppelte Relationships, 0 Orphan-Quellen/-Ziele, ISO-8601-Zeitstempel, keine verschachtelten Arrays/ETS-Artefakte und keine Registration-/AssignedUser-/Credential-/UPN-Leakage
 
-> **P5 ist implementiert, aber noch nicht real validiert. Durch die P5-Codeänderungen ist die bestätigte P4-Laufzeitfreigabe für den aktuellen ausführbaren Stand nicht mehr ausreichend. Vor dem ersten P5-Azure-Lauf muss die automatische Pre-Azure-Validierung erneut erfolgreich sein.**
+> **P5 Azure Virtual Desktop ist für den aktuellen Entwicklungsstand abgeschlossen. Positive heterogene AVD-Szenarien wie Scaling Plans und mehrere Session Hosts bleiben Bestandteil späterer P10-Integrationstests und blockieren P6/P7 nicht.**
 
 ## P6 – Storage / Backup / Key Vault
-- [ ] Metadaten und Secret-Filtering
+- [x] Architektur und Sicherheits-/Secret-Grenzen dokumentiert (`Docs/P6-Storage-Backup-KeyVault.md`)
+- [x] drei getrennte Exportdomänen beschlossen und implementiert: `storage.json`, `backup.json`, `keyVault.json`
+- [x] `Queries/Storage.kql` und `Collector.Storage.psm1` implementiert
+- [x] `Queries/KeyVault.kql` und `Collector.KeyVault.psm1` implementiert
+- [x] `Queries/Backup.TopLevel.kql` für Vaults aus `Resources` implementiert
+- [x] `Queries/Backup.Resources.kql` für Policies/Protected Items/Backup Instances aus `RecoveryServicesResources` implementiert
+- [x] Backup-Tabellen werden getrennt gelesen und erst lokal zusammengeführt; kein Cross-Table-`union`
+- [x] Storage->Subnetz-, KeyVault->Subnetz- sowie Vault/Policy/ProtectedItem/ProtectedResource-Relationships implementiert
+- [x] Last Recovery Point lokal invariant als UTC/ISO-8601 normalisiert
+- [x] P6 vollständig in den normalen Collector als Phase 6 von 8 integriert; Storage, Backup und Key Vault besitzen getrennte Fehlergrenzen
+- [x] `summary.storage`, `summary.backup` und `summary.keyVault` integriert
+- [x] Secret-/PII-Grenzen für Storage Keys/SAS/Connection Strings, Backup Credentials/Secret Stores/CMK und Key-Vault-Inhalte/Access-Policy-Identitäten abgesichert
+- [x] Unit-/Regressionstests für Query-Safety, Normalisierung, Relationships, Array-Shape und Empty Arrays ergänzt
+- [x] statische Read-only-Gegenprüfung: keine neuen Fachcmdlets, kein REST/Web-/CLI-/SDK-Schreibpfad; Azure-Zugriff bleibt ausschließlich über den bestehenden Resource-Graph-Wrapper
+- [x] automatische Pre-Azure-Validierung des finalen P6-Stands erfolgreich: PowerShell 7.6.4, Pester 6.0.1, 15 Testdateien, 73/73 Tests, beide Gates `READ-ONLY VERIFIED`, `READY FOR AZURE TEST`, vor Azure `Azure access performed: NO`, keine Administrator-Elevation
+- [x] finaler P6-Real-Export 2026-08-12 erfolgreich: 8 Storage Accounts, 1 Key Vault, 2 Recovery Services Vaults, 0 Backup Vaults, 8 Backup Policies, 4 Recovery Services Protected Items, 0 Backup Instances, 21 P6-Relationships insgesamt, 0 Fehler, `Success`
+- [x] P6-Relationships vollständig geprüft: 8/8 `ContainsBackupPolicy`, 4/4 `ContainsProtectedItem`, 4/4 `UsesBackupPolicy`, 4/4 `ProtectsResource`, 0 Duplikate, 0 Orphan-Quellen, 0 Orphan-Ziele
+- [x] vier geschützte Ressourcen korrekt per ARM ID aufgelöst: 3 vorhandene P4-VMs und 1 vorhandener Storage Account
+- [x] Export-Härtung bestätigt: Summary-Bereiche konsistent, keine verschachtelten Arrays/ETS-Artefakte/RG-Casing-Abweichungen und keine Account-Key-/SAS-/Connection-String-/Private-Key-/PFX-/Backup-Credential-/Secret-/Key-URI-/AccessPolicy-/JWT-/UPN-Leakage
+- [x] P3/P4/P5-Rückwärtskompatibilität im P6-Real-Export bestätigt: `resourceGroups.json`, `resources.json`, `network.json`, `compute.json` und `avd.json` gegenüber dem unmittelbar vorherigen validierten P5-Export inhaltlich unverändert
+
+> **P6 Storage / Backup / Key Vault ist für den aktuellen Entwicklungsstand abgeschlossen. Data-Protection-Backup-Vault-/Backup-Instance-Positivpfade sowie weitere heterogene Storage-/Key-Vault-Netzwerkszenarien bleiben Bestandteil späterer P10-Integrationstests und blockieren P7 nicht.**
 
 ## P7 – Security / Governance
 - [ ] RBAC / Policies / Locks / Identitätsdatenschutz
@@ -898,7 +1022,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 - [ ] vereinheitlichtes Relationship-Schema
 
 ## P10 – Qualitätssicherung / Härtung
-- [ ] Integrationstests in heterogenen Testumgebungen, insbesondere positive Real-Azure-Abdeckung für P3b-Ressourcentypen sowie zusätzliche Compute-Szenarien wie Availability Sets/Zones/Gallery-Varianten
+- [ ] Integrationstests in heterogenen Testumgebungen, insbesondere positive Real-Azure-Abdeckung für P3b-Ressourcentypen, zusätzliche Compute-Szenarien wie Availability Sets/Zones/Gallery-Varianten, AVD Scaling Plans/mehrere Session Hosts sowie Data-Protection-Backup-Vault-/Backup-Instance- und weitere Storage-/Key-Vault-Netzwerkszenarien
 - [ ] Reader-Rechte / fehlende Berechtigungen
 - [ ] weitergehende Secret Leakage Tests mit späteren Detailmodulen
 - [ ] JSON Schema Validation
@@ -931,7 +1055,7 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 13. Vor realen Azure-Läufen muss der aktuelle Stand `READY FOR AZURE TEST` erreichen; im normalen Startpfad wird dies automatisch erzwungen.
 14. Architektur-/Scope-Änderungen werden zuerst in diesem Dokument festgelegt.
 15. Jeder Fachmodul-Export muss vor dem Schreiben durch die zentrale Export-Härtung laufen.
-16. P3/P4/P5 dürfen keine parallelen Sonderwege für Secret-Filtering oder RG-Normalisierung einführen.
+16. P3/P4/P5/P6 dürfen keine parallelen Sonderwege für Secret-Filtering oder RG-Normalisierung einführen.
 17. Network Connections dürfen `sharedKey` weder abfragen noch exportieren.
 18. Netzwerkbeziehungen werden soweit möglich über Resource IDs und nicht über Namensheuristiken modelliert.
 19. P3b darf Private-Link-Freitext, Application-Gateway-Zertifikatsmaterial, Azure-Firewall-Regelkollektionen oder Firewall-Policy-Zertifikats-/Transport-Security-Daten nicht exportieren, solange hierfür keine separate spätere Sicherheitsentscheidung getroffen wurde.
@@ -940,6 +1064,8 @@ Die KI darf keine nicht durch Quelldaten belegten Fakten erfinden. Insbesondere 
 22. Ein fehlender P4-Power-State darf niemals als bestimmter VM-Zustand interpretiert oder ergänzt werden.
 23. P5 darf Registration Tokens, SSO-Secret-Pfade, Assigned Users/User Sessions, Application-Ausführungspfade sowie frei formulierte Health-/Update-/Scaling-Notification-Texte nicht in `avd.json` exportieren.
 24. P5 darf Session-Host-zu-VM-Beziehungen ausschließlich aus der von Azure gelieferten VM-Resource-ID ableiten; DNS-/VM-Namensheuristiken sind dafür nicht zulässig.
+25. P6 darf Storage Keys/SAS/Connection Strings, Backup Credentials/Secret-Store-Werte/CMK-Key-Material oder Key-Vault-Secret-/Key-/Certificate-Inhalte nicht exportieren.
+26. P6 darf Backup-zu-Ressource- und Policy-Beziehungen ausschließlich aus Azure gelieferten ARM IDs ableiten; Namensheuristiken sind dafür nicht zulässig.
 
 ---
 
@@ -980,19 +1106,19 @@ P0c  Pre-Azure Validation
 P1   Core / Auth / Tenant / Subscription / Scope
 P2   Basisinventar
 P2a  Export-Härtung vor P3
-P3a  Network Topology Foundation
-P3b  Erweiterte Netzwerkdienste
-P4   Compute
-P5   AVD
-P6   Storage / Backup / Key Vault
-P7   Security / Governance
+P3a  Network Topology Foundation                 ✅ abgeschlossen
+P3b  Erweiterte Netzwerkdienste                 ✅ abgeschlossen
+P4   Compute                                     ✅ abgeschlossen
+P5   AVD                                         ✅ abgeschlossen
+P6   Storage / Backup / Key Vault                ✅ abgeschlossen
+P7   Security / Governance                       ⬅️ nächster Block
 P8   Monitoring / Automation
 P9   Relationship Engine
 P10  Tests / Härtung
 P11  Release 1.0
 ```
 
-**Aktueller nächster Schritt:** P5 AVD ist implementiert, aber noch nicht real validiert. Der aktuelle `main` muss über den normalen Ein-Befehl-Start die automatische Pre-Azure-Validierung bestehen. Auf Basis des bestätigten P4-Stands mit 52 Tests plus sieben neuen P5-Tests werden **voraussichtlich 10 Testdateien / 59 Tests** erwartet; diese Zahl gilt erst nach dem lokalen Lauf als bestätigt. Nur bei `Failed: 0`, beiden Gates `READ-ONLY VERIFIED` und `READY FOR AZURE TEST` darf der anschließende P5-Real-Run stattfinden. Danach wird `avd.json` gegen das Core-/P4-Inventar auf Workspace-/Host-Pool-/Application-Group-/Session-Host-/Scaling-Plan-Counts, Session-Host-zu-VM-Relationships, Orphans, Start-VM-on-Connect, Session-/Status-Momentaufnahmen, RG-Casing, Array-/Schema-Stabilität sowie Secret-/PII-Leakage geprüft. Erst danach gilt P5 als abgeschlossen und P6 wird begonnen.
+**Aktueller nächster Schritt:** P7 Security / Governance. P5 und P6 sind implementiert, erfolgreich durch die automatische Pre-Azure-Validierung gelaufen und real gegen Azure validiert. Der aktuell bestätigte P6-Lauf besitzt 15 Testdateien / 73 Tests, beide Read-only-Gates `READ-ONLY VERIFIED`, `READY FOR AZURE TEST`, vor Azure `Azure access performed: NO` sowie einen anschließenden erfolgreichen Collector-Lauf mit 0 Fehlern. Für P7 müssen Scope, Identitätsdaten-Minimierung, ARG-/Read-only-Datenquellen, Relationships und Sicherheitsgrenzen vor der Implementierung gegen den bestehenden Stand geprüft werden. Jede P7-Codeänderung invalidiert die aktuelle Laufzeitfreigabe und erfordert vor einem neuen realen Azure-Lauf erneut die vollständige automatische Pre-Azure-Validierung.
 
 ---
 
@@ -1020,7 +1146,7 @@ Collector erfasst ausschließlich lesend den Ist-Zustand
         ->
 JSON normalisiert, verknüpft und härtet die Fakten
         ->
-KI interpretiert und formuliert
+DocumentationEngine / KI interpretiert und formuliert
         ->
 Dokumente und Diagramme präsentieren das Ergebnis
 ```
